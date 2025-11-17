@@ -166,7 +166,21 @@
                     setShowCopySuccess(true);
                     setTimeout(() => setShowCopySuccess(false), 2000);
                 }).catch(() => {
-                    alert('Copy failed. Please copy manually.');
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = textToCopy;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-999999px';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                        setShowCopySuccess(true);
+                        setTimeout(() => setShowCopySuccess(false), 2000);
+                    } catch (err) {
+                        alert('Copy failed. Please copy manually.');
+                    }
+                    document.body.removeChild(textArea);
                 });
             };
 
@@ -316,49 +330,75 @@
                                     ← Back to Inbox
                                 </button>
                             </div>
-                            <div className="p-4">
+                            <div className="p-4 space-y-4">
                                 {(() => {
                                     const email = emails.find(e => e.id === selectedEmail);
                                     return (
-                                        <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                                            <div className="mb-4 pb-4 border-b">
-                                                <p className="text-sm text-gray-500 mb-1">To:</p>
-                                                <p className="font-semibold">{email.sender}</p>
-                                                <p className="text-sm text-gray-600">{email.senderEmail}</p>
+                                        <>
+                                            {/* Email Preview Card */}
+                                            <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className="flex-1">
+                                                        <p className="text-sm text-gray-500 mb-1">From:</p>
+                                                        <p className="font-semibold text-lg">{email.sender}</p>
+                                                        <p className="text-sm text-gray-600">{email.senderEmail}</p>
+                                                    </div>
+                                                    <span className={`text-xs px-2 py-1 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                        {email.priority}
+                                                    </span>
+                                                </div>
+                                                <div className="border-t pt-3 mt-3">
+                                                    <p className="text-sm text-gray-500 mb-1">Subject:</p>
+                                                    <p className="font-semibold mb-3">{email.subject}</p>
+                                                    <p className="text-sm text-gray-500 mb-1">Message:</p>
+                                                    <p className="text-sm leading-relaxed">{email.preview}</p>
+                                                </div>
+                                                {email.tags && email.tags.length > 0 && (
+                                                    <div className="flex gap-2 mt-3 flex-wrap">
+                                                        {email.tags.map((tag, idx) => (
+                                                            <span key={idx} className={`text-xs px-2 py-1 rounded-full ${darkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                                                                {tag}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
-                                            
-                                            <h2 className="text-xl font-bold mb-4">🤖 AI-Powered Reply</h2>
-                                            
-                                            <button 
-                                                onClick={generateAIReply}
-                                                disabled={isGenerating}
-                                                className={`w-full mb-4 py-3 rounded-xl font-semibold ${
-                                                    isGenerating 
-                                                        ? 'bg-gray-400 cursor-not-allowed' 
-                                                        : 'bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white'
-                                                }`}>
-                                                {isGenerating ? '⏳ Generating AI Reply...' : '✨ Generate AI Reply'}
-                                            </button>
-                                            
-                                            <textarea 
-                                                value={draftReply}
-                                                onChange={(e) => setDraftReply(e.target.value)}
-                                                placeholder="AI reply will appear here..."
-                                                className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
-                                            />
-                                            <div className="flex gap-3 mt-4">
+
+                                            {/* AI Reply Card */}
+                                            <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                                                <h2 className="text-xl font-bold mb-4">🤖 AI-Powered Reply</h2>
+                                                
                                                 <button 
-                                                    onClick={copyDraftToClipboard}
-                                                    className="flex-1 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold">
-                                                    📋 Copy Email & Reply
+                                                    onClick={generateAIReply}
+                                                    disabled={isGenerating}
+                                                    className={`w-full mb-4 py-3 rounded-xl font-semibold ${
+                                                        isGenerating 
+                                                            ? 'bg-gray-400 cursor-not-allowed' 
+                                                            : 'bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white'
+                                                    }`}>
+                                                    {isGenerating ? '⏳ Generating Smart Reply...' : '✨ Generate Smart Reply'}
                                                 </button>
-                                                <button 
-                                                    onClick={() => setScreen('inbox')}
-                                                    className={`px-6 py-3 rounded-xl font-semibold ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                                                    Done
-                                                </button>
+                                                
+                                                <textarea 
+                                                    value={draftReply}
+                                                    onChange={(e) => setDraftReply(e.target.value)}
+                                                    placeholder="Click 'Generate Smart Reply' to create a personalized response..."
+                                                    className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
+                                                />
+                                                <div className="flex gap-3 mt-4">
+                                                    <button 
+                                                        onClick={copyDraftToClipboard}
+                                                        className="flex-1 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold">
+                                                        📋 Copy Email & Reply
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setScreen('inbox')}
+                                                        className={`px-6 py-3 rounded-xl font-semibold ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                                        Done
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
+                                        </>
                                     );
                                 })()}
                             </div>
