@@ -28,18 +28,39 @@
         const [darkMode, setDarkMode] = useState(false);
         const [selectedEmail, setSelectedEmail] = useState(null);
         const [showImport, setShowImport] = useState(false);
+        const [searchQuery, setSearchQuery] = useState('');
+        const [draftReply, setDraftReply] = useState('');
+        const [showCopySuccess, setShowCopySuccess] = useState(false);
+
+        // Load from localStorage on mount
+        useEffect(() => {
+            const savedEmails = localStorage.getItem('dayorganizer-emails');
+            const savedTasks = localStorage.getItem('dayorganizer-tasks');
+            const savedEvents = localStorage.getItem('dayorganizer-events');
+            
+            if (savedEmails) setEmails(JSON.parse(savedEmails));
+            if (savedTasks) setTasks(JSON.parse(savedTasks));
+            if (savedEvents) setEvents(JSON.parse(savedEvents));
+        }, []);
+
+        // Save to localStorage whenever data changes
+        useEffect(() => {
+            if (emails.length > 0) {
+                localStorage.setItem('dayorganizer-emails', JSON.stringify(emails));
+            }
+        }, [emails]);
 
         useEffect(() => {
-            setEmails([
-                { id: 1, sender: "Sarah Johnson", subject: "Math Progress", preview: "Checking in about Emma...", priority: "High", aiDraft: "Hi Sarah,\n\nThank you for reaching out. Emma is doing great!\n\nBest,\nAlnoor" }
-            ]);
-            setTasks([
-                { id: 1, text: "Review essay feedback", done: false }
-            ]);
-            setEvents([
-                { id: 1, title: "Team Meeting", start: "2025-11-16T14:00:00", location: "Office" }
-            ]);
-        }, []);
+            if (tasks.length > 0) {
+                localStorage.setItem('dayorganizer-tasks', JSON.stringify(tasks));
+            }
+        }, [tasks]);
+
+        useEffect(() => {
+            if (events.length > 0) {
+                localStorage.setItem('dayorganizer-events', JSON.stringify(events));
+            }
+        }, [events]);
 
         const importJSON = (e) => {
             const file = e.target.files[0];
@@ -55,30 +76,67 @@
                     const processed = emailData.map((item, i) => ({
                         id: Date.now() + i,
                         sender: item.sender.replace(/<.*>/, '').trim(),
+                        senderEmail: item.sender.match(/<(.+?)>/)?.[1] || item.sender,
                         subject: item.subject,
                         preview: item.preview,
+                        date: item.received_at,
                         priority: item.tags?.includes('Action Required') ? 'High' : 'Medium',
-                        aiDraft: "Hi,\n\nThank you for your message.\n\nBest,\nAlnoor"
+                        aiDraft: generateDraft(item.sender, item.subject)
                     }));
-                    
-                    console.log('Importing emails:', processed.length);
-                    console.log('Importing events:', eventData.length);
                     
                     setEmails(processed);
                     setEvents(eventData);
                     setShowImport(false);
-                    alert('Imported ' + processed.length + ' emails and ' + eventData.length + ' events!');
+                    alert('✅ Imported ' + processed.length + ' emails and ' + eventData.length + ' events!');
                 } catch (err) {
-                    alert('Error: ' + err.message);
+                    alert('❌ Error: ' + err.message);
                 }
             };
             reader.readAsText(file);
+        };
+
+        const generateDraft = (sender, subject) => {
+            const name = sender.replace(/<.*>/, '').trim().split(' ')[0];
+            return `Hi ${name},\n\nThank you for your message regarding "${subject}".\n\nI will review this and get back to you shortly.\n\nBest regards,\nAlnoor`;
+        };
+
+        const copyDraftToClipboard = () => {
+            const email = emails.find(e => e.id === selectedEmail);
+            if (!email) return;
+            
+            const textToCopy = `To: ${email.senderEmail}\n\n${draftReply}`;
+            
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                setShowCopySuccess(true);
+                setTimeout(() => setShowCopySuccess(false), 2000);
+            }).catch(() => {
+                alert('Copy failed. Please copy manually.');
+            });
+        };
+
+        const deleteEvent = (eventId) => {
+            if (confirm('Delete this event?')) {
+                setEvents(events.filter(e => e.id !== eventId));
+            }
         };
 
         const formatTime = (dateStr) => {
             const d = new Date(dateStr);
             return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         };
+
+        const formatDate = (dateStr) => {
+            const d = new Date(dateStr);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        };
+
+        const filteredEmails = emails.filter(e => {
+            if (!searchQuery) return true;
+            const q = searchQuery.toLowerCase();
+            return e.sender.toLowerCase().includes(q) || 
+                   e.subject.toLowerCase().includes(q) ||
+                   e.preview.toLowerCase().includes(q);
+        });
 
         return (
             <div className={darkMode ? 'bg-gray-900 text-white min-h-screen' : 'bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen'}>
@@ -89,8 +147,15 @@
                                 <h2 className="text-xl font-bold">Import JSON</h2>
                                 <button onClick={() => setShowImport(false)} className="text-2xl">&times;</button>
                             </div>
+                            <p className="text-sm text-gray-500 mb-4">Upload your daily organizer data</p>
                             <input type="file" accept=".json" onChange={importJSON} className="w-full p-3 rounded-xl border" />
                         </div>
+                    </div>
+                )}
+
+                {showCopySuccess && (
+                    <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50">
+                        ✅ Copied to clipboard!
                     </div>
                 )}
 
@@ -111,7 +176,7 @@
                         <div className="p-6 space-y-6">
                             <div className={`rounded-2xl p-6 border ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
                                 <h2 className="text-xl font-bold mb-4">🎯 Priority Today</h2>
-                                {tasks.filter(t => !t.done).map(task => (
+                                {tasks.filter(t => !t.done).slice(0, 3).map(task => (
                                     <div key={task.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 mb-2">
                                         <input type="checkbox" checked={task.done} onChange={() => {
                                             setTasks(tasks.map(t => t.id === task.id ? {...t, done: !t.done} : t));
@@ -123,10 +188,10 @@
 
                             <div className="grid grid-cols-2 gap-4">
                                 <button onClick={() => setScreen('inbox')} className="bg-blue-500 text-white p-4 rounded-xl font-medium">
-                                    📧 View Inbox
+                                    📧 Inbox ({emails.length})
                                 </button>
-                                <button onClick={() => setScreen('tasks')} className="bg-purple-500 text-white p-4 rounded-xl font-medium">
-                                    ✅ View Tasks
+                                <button onClick={() => setScreen('calendar')} className="bg-purple-500 text-white p-4 rounded-xl font-medium">
+                                    📅 Calendar ({events.length})
                                 </button>
                             </div>
                         </div>
@@ -136,28 +201,54 @@
                 {screen === 'inbox' && (
                     <div className="pb-24">
                         <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
-                            <div className="flex justify-between items-center">
+                            <div className="flex justify-between items-center mb-4">
                                 <h1 className="text-2xl font-bold">📧 Inbox</h1>
-                                <button onClick={() => setShowImport(true)} className="bg-blue-500 text-white px-4 py-2 rounded-lg">
-                                    Upload
+                                <button onClick={() => setShowImport(true)} className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                                    📤 Upload
                                 </button>
+                            </div>
+                            
+                            <div className={`flex items-center gap-2 px-4 py-3 rounded-xl ${darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                                <span className="text-xl">🔍</span>
+                                <input 
+                                    type="text" 
+                                    placeholder="Search emails..." 
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="flex-1 bg-transparent outline-none text-sm"
+                                />
+                                {searchQuery && (
+                                    <button onClick={() => setSearchQuery('')} className="text-gray-500">✕</button>
+                                )}
                             </div>
                         </div>
 
                         <div className="p-4 space-y-3">
-                            {emails.map(email => (
-                                <div key={email.id} onClick={() => { setSelectedEmail(email.id); setScreen('draft'); }}
+                            {filteredEmails.map(email => (
+                                <div key={email.id} onClick={() => { 
+                                    setSelectedEmail(email.id); 
+                                    setDraftReply(email.aiDraft);
+                                    setScreen('draft'); 
+                                }}
                                     className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="font-semibold">{email.sender}</h3>
-                                        <span className={`text-xs px-2 py-0.5 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                            {email.priority}
-                                        </span>
+                                    <div className="flex items-start justify-between mb-2">
+                                        <h3 className="font-semibold text-sm flex-1">{email.sender}</h3>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-xs px-2 py-0.5 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                {email.priority}
+                                            </span>
+                                            <span className="text-xs text-gray-500">{formatDate(email.date)}</span>
+                                        </div>
                                     </div>
-                                    <p className="font-medium text-sm">{email.subject}</p>
-                                    <p className="text-xs text-gray-500 mt-1">{email.preview}</p>
+                                    <p className="font-medium text-sm mb-1">{email.subject}</p>
+                                    <p className="text-xs text-gray-500 mt-1">{email.preview.substring(0, 80)}...</p>
                                 </div>
                             ))}
+                            {filteredEmails.length === 0 && (
+                                <div className="text-center py-12 text-gray-500">
+                                    {searchQuery ? '🔍 No emails found' : '📭 No emails yet'}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -165,21 +256,42 @@
                 {screen === 'draft' && selectedEmail && (
                     <div className="pb-24">
                         <div className={`sticky top-0 backdrop-blur-xl border-b p-4 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
-                            <button onClick={() => setScreen('inbox')} className="flex items-center gap-2">
-                                ← Back
+                            <button onClick={() => setScreen('inbox')} className="flex items-center gap-2 text-blue-500">
+                                ← Back to Inbox
                             </button>
                         </div>
                         <div className="p-4">
-                            <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                                <h2 className="text-xl font-bold mb-4">AI Draft Reply</h2>
-                                <textarea 
-                                    defaultValue={emails.find(e => e.id === selectedEmail)?.aiDraft}
-                                    className="w-full p-4 rounded-xl border min-h-64 bg-gray-50"
-                                />
-                                <button onClick={() => setScreen('inbox')} className="w-full mt-4 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold">
-                                    Send & Mark Done
-                                </button>
-                            </div>
+                            {(() => {
+                                const email = emails.find(e => e.id === selectedEmail);
+                                return (
+                                    <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                                        <div className="mb-4 pb-4 border-b">
+                                            <p className="text-sm text-gray-500 mb-1">To:</p>
+                                            <p className="font-semibold">{email.sender}</p>
+                                            <p className="text-sm text-gray-600">{email.senderEmail}</p>
+                                        </div>
+                                        
+                                        <h2 className="text-xl font-bold mb-4">✍️ Draft Reply</h2>
+                                        <textarea 
+                                            value={draftReply}
+                                            onChange={(e) => setDraftReply(e.target.value)}
+                                            className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
+                                        />
+                                        <div className="flex gap-3 mt-4">
+                                            <button 
+                                                onClick={copyDraftToClipboard}
+                                                className="flex-1 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold">
+                                                📋 Copy Email & Reply
+                                            </button>
+                                            <button 
+                                                onClick={() => setScreen('inbox')}
+                                                className={`px-6 py-3 rounded-xl font-semibold ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                                Done
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 )}
@@ -219,21 +331,28 @@
                                     <div key={event.id}>
                                         {showDate && (
                                             <div className="text-sm font-bold text-gray-500 mt-4 mb-2">
-                                                {eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                                                {eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                                             </div>
                                         )}
-                                        <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                                            <h3 className="text-lg font-bold">{event.title}</h3>
-                                            <p className="text-sm text-gray-500 mt-2">🕐 {formatTime(event.start)}</p>
-                                            {event.location && <p className="text-sm text-gray-500 mt-1">📍 {event.location}</p>}
-                                            {event.description && <p className="text-xs text-gray-400 mt-2">{event.description.substring(0, 100)}{event.description.length > 100 ? '...' : ''}</p>}
+                                        <div className={`rounded-2xl p-5 border relative ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex-1">
+                                                    <h3 className="text-lg font-bold">{event.title}</h3>
+                                                    <p className="text-sm text-gray-500 mt-2">🕐 {formatTime(event.start)}</p>
+                                                    {event.location && <p className="text-sm text-gray-500 mt-1">📍 {event.location}</p>}
+                                                </div>
+                                                <button 
+                                                    onClick={() => deleteEvent(event.id)}
+                                                    className="text-red-500 hover:bg-red-50 p-2 rounded-lg ml-2">
+                                                    🗑️
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 );
                             }) : (
                                 <div className="text-center py-12 text-gray-500">
                                     <p>📅 No events</p>
-                                    <p className="text-sm mt-2">Import your calendar data to see events</p>
                                 </div>
                             )}
                         </div>
