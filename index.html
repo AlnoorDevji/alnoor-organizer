@@ -204,18 +204,33 @@
                 {screen === 'calendar' && (
                     <div className="pb-24">
                         <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
-                            <h1 className="text-2xl font-bold">📅 Today's Schedule</h1>
+                            <h1 className="text-2xl font-bold">📅 Calendar - Next 30 Days</h1>
+                            <p className="text-sm text-gray-500 mt-1">{events.length} events</p>
                         </div>
                         <div className="p-4 space-y-3">
-                            {events.length > 0 ? events.map(event => (
-                                <div key={event.id} className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                                    <h3 className="text-lg font-bold">{event.title}</h3>
-                                    <p className="text-sm text-gray-500 mt-2">🕐 {formatTime(event.start)}</p>
-                                    {event.location && <p className="text-sm text-gray-500">📍 {event.location}</p>}
-                                </div>
-                            )) : (
+                            {events.length > 0 ? events.map((event, idx) => {
+                                const eventDate = new Date(event.start);
+                                const showDate = idx === 0 || new Date(events[idx-1].start).toDateString() !== eventDate.toDateString();
+                                
+                                return (
+                                    <div key={event.id}>
+                                        {showDate && (
+                                            <div className="text-sm font-bold text-gray-500 mt-4 mb-2">
+                                                {eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                                            </div>
+                                        )}
+                                        <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                                            <h3 className="text-lg font-bold">{event.title}</h3>
+                                            <p className="text-sm text-gray-500 mt-2">🕐 {formatTime(event.start)}</p>
+                                            {event.location && <p className="text-sm text-gray-500 mt-1">📍 {event.location}</p>}
+                                            {event.description && <p className="text-xs text-gray-400 mt-2">{event.description.substring(0, 100)}{event.description.length > 100 ? '...' : ''}</p>}
+                                        </div>
+                                    </div>
+                                );
+                            }) : (
                                 <div className="text-center py-12 text-gray-500">
-                                    <p>📅 No events today</p>
+                                    <p>📅 No events</p>
+                                    <p className="text-sm mt-2">Import your calendar data to see events</p>
                                 </div>
                             )}
                         </div>
