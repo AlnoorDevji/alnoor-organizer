@@ -127,4 +127,661 @@ Generate ONLY the email reply text, no additional commentary.
             headers: {
               "Content-Type": "application/json",
               // IMPORTANT:
-              // You will need to add your Anthropic AP
+              // You will need to add your Anthropic API key and version header here,
+              // but DO NOT commit the real key to GitHub.
+              // "x-api-key": "YOUR_ANTHROPIC_API_KEY",
+              // "anthropic-version": "2023-06-01"
+            },
+            body: JSON.stringify({
+              model: "claude-3-sonnet-20240229", // Adjust if you use a different model
+              max_tokens: 1000,
+              messages: [
+                {
+                  role: "user",
+                  content: buildReplyPrompt(email),
+                },
+              ],
+            }),
+          });
+
+          if (!response.ok) {
+            console.error("Anthropic API error status:", response.status);
+            alert("Unable to generate reply. Please check your API settings.");
+            setIsGenerating(false);
+            return;
+          }
+
+          const data = await response.json();
+
+          // Anthropic messages API response format
+          const text =
+            data &&
+            Array.isArray(data.content) &&
+            data.content[0] &&
+            data.content[0].text
+              ? data.content[0].text.trim()
+              : "";
+
+          if (text) {
+            setDraftReply(text);
+            setEmails((prev) =>
+              prev.map((e) =>
+                e.id === selectedEmail ? { ...e, aiDraft: text } : e
+              )
+            );
+          } else {
+            alert("Unable to generate reply. Please try again.");
+          }
+        } catch (error) {
+          console.error("AI Error:", error);
+          alert(
+            "Failed to generate AI reply. Check your connection or API configuration."
+          );
+        } finally {
+          setIsGenerating(false);
+        }
+      };
+
+      const importJSON = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            const emailData = Array.isArray(data) ? data : data.emails || [];
+            const eventData = data.events || [];
+
+            const processed = emailData.map((item, i) => ({
+              id: Date.now() + i,
+              sender: (item.sender || "").replace(/<.*>/, "").trim(),
+              senderEmail:
+                (item.sender || "").match(/<(.+?)>/)?.[1] || item.sender || "",
+              subject: item.subject || "",
+              preview: item.preview || "",
+              date: item.received_at || new Date().toISOString(),
+              priority: item.tags?.includes("Action Required") ? "High" : "Medium",
+              tags: item.tags || [],
+              aiDraft: item.aiDraft || "",
+            }));
+
+            setEmails(processed);
+            setEvents(eventData);
+            setShowImport(false);
+            alert(
+              "Imported " + processed.length + " emails and " + eventData.length + " events."
+            );
+          } catch (err) {
+            console.error("Import error:", err);
+            alert("Error parsing JSON file: " + err.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const copyDraftToClipboard = () => {
+        const email = emails.find((e) => e.id === selectedEmail);
+        if (!email) {
+          alert("No email selected.");
+          return;
+        }
+
+        const textToCopy = `To: ${email.senderEmail}\n\n${draftReply || ""}`;
+
+        navigator.clipboard
+          .writeText(textToCopy)
+          .then(() => {
+            setShowCopySuccess(true);
+            setTimeout(() => setShowCopySuccess(false), 2000);
+          })
+          .catch(() => {
+            alert("Copy failed. Please copy manually.");
+          });
+      };
+
+      const deleteEvent = (eventId) => {
+        if (confirm("Delete this event?")) {
+          setEvents((prev) => prev.filter((e) => e.id !== eventId));
+        }
+      };
+
+      const formatTime = (dateStr) => {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return "";
+        return d.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        });
+      };
+
+      const formatDate = (dateStr) => {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return "";
+        return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      };
+
+      const filteredEmails = emails.filter((e) => {
+        if (!searchQuery) return true;
+        const q = searchQuery.toLowerCase();
+        return (
+          (e.sender || "").toLowerCase().includes(q) ||
+          (e.subject || "").toLowerCase().includes(q) ||
+          (e.preview || "").toLowerCase().includes(q)
+        );
+      });
+
+      const today = new Date();
+      const formattedToday = today.toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      return (
+        <div
+          className={
+            darkMode
+              ? "bg-gray-900 text-white min-h-screen"
+              : "bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen"
+          }
+        >
+          {showImport && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+              <div
+                className={
+                  "rounded-3xl p-6 max-w-md w-full " +
+                  (darkMode ? "bg-gray-800" : "bg-white")
+                }
+              >
+                <div className="flex justify-between mb-4">
+                  <h2 className="text-xl font-bold">Import JSON</h2>
+                  <button
+                    onClick={() => setShowImport(false)}
+                    className="text-2xl"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <p className="text-sm text-gray-500 mb-4">
+                  Upload your daily organizer data
+                </p>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={importJSON}
+                  className="w-full p-3 rounded-xl border"
+                />
+              </div>
+            </div>
+          )}
+
+          {showCopySuccess && (
+            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50">
+              Copied to clipboard.
+            </div>
+          )}
+
+          {screen === "today" && (
+            <div className="pb-24">
+              <div
+                className={
+                  "sticky top-0 backdrop-blur-xl border-b p-6 " +
+                  (darkMode
+                    ? "bg-gray-900/80 border-gray-800"
+                    : "bg-white/80 border-gray-200")
+                }
+              >
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h1 className="text-3xl font-bold">Good Morning</h1>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {formattedToday}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setDarkMode((prev) => !prev)}
+                    className="p-2 rounded-lg bg-gray-200"
+                  >
+                    {darkMode ? "☀️" : "🌙"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-6">
+                <div
+                  className={
+                    "rounded-2xl p-6 border " +
+                    (darkMode
+                      ? "bg-gray-800/50 border-gray-700"
+                      : "bg-white/50 border-gray-200")
+                  }
+                >
+                  <h2 className="text-xl font-bold mb-4">Priority Today</h2>
+                  {tasks
+                    .filter((t) => !t.done)
+                    .slice(0, 3)
+                    .map((task) => (
+                      <div
+                        key={task.id}
+                        className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 mb-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={task.done}
+                          onChange={() => {
+                            setTasks((prev) =>
+                              prev.map((t) =>
+                                t.id === task.id
+                                  ? { ...t, done: !t.done }
+                                  : t
+                              )
+                            );
+                          }}
+                          className="w-5 h-5"
+                        />
+                        <span>{task.text}</span>
+                      </div>
+                    ))}
+                  {tasks.filter((t) => !t.done).length === 0 && (
+                    <p className="text-sm text-gray-500">
+                      No tasks yet. You can add tasks manually in a future phase.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => setScreen("inbox")}
+                    className="bg-blue-500 text-white p-4 rounded-xl font-medium"
+                  >
+                    📧 Inbox ({emails.length})
+                  </button>
+                  <button
+                    onClick={() => setScreen("calendar")}
+                    className="bg-purple-500 text-white p-4 rounded-xl font-medium"
+                  >
+                    📅 Calendar ({events.length})
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {screen === "inbox" && (
+            <div className="pb-24">
+              <div
+                className={
+                  "sticky top-0 backdrop-blur-xl border-b p-6 " +
+                  (darkMode ? "bg-gray-900/80" : "bg-white/80")
+                }
+              >
+                <div className="flex justify-between items-center mb-4">
+                  <h1 className="text-2xl font-bold">Inbox</h1>
+                  <button
+                    onClick={() => setShowImport(true)}
+                    className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                  >
+                    Upload JSON
+                  </button>
+                </div>
+
+                <div
+                  className={
+                    "flex items-center gap-2 px-4 py-3 rounded-xl " +
+                    (darkMode ? "bg-gray-800" : "bg-gray-100")
+                  }
+                >
+                  <span className="text-xl">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Search emails"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="flex-1 bg-transparent outline-none text-sm"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="text-gray-500"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 space-y-3">
+                {filteredEmails.map((email) => (
+                  <div
+                    key={email.id}
+                    onClick={() => {
+                      setSelectedEmail(email.id);
+                      setDraftReply(
+                        email.aiDraft ||
+                          'Click "Generate AI Reply" to create a personalized response.'
+                      );
+                      setScreen("draft");
+                    }}
+                    className={
+                      "rounded-2xl p-4 border cursor-pointer " +
+                      (darkMode
+                        ? "bg-gray-800/50 border-gray-700"
+                        : "bg-white/50 border-gray-200")
+                    }
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold text-sm flex-1">
+                        {email.sender}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={
+                            "text-xs px-2 py-0.5 rounded-full " +
+                            (email.priority === "High"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-yellow-100 text-yellow-700")
+                          }
+                        >
+                          {email.priority}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {formatDate(email.date)}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="font-medium text-sm mb-1">
+                      {email.subject}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {(email.preview || "").substring(0, 80)}
+                      {email.preview && email.preview.length > 80 ? "..." : ""}
+                    </p>
+                  </div>
+                ))}
+
+                {filteredEmails.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    {searchQuery ? "No emails found." : "No emails imported yet."}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {screen === "draft" && selectedEmail && (
+            <div className="pb-24">
+              <div
+                className={
+                  "sticky top-0 backdrop-blur-xl border-b p-4 " +
+                  (darkMode ? "bg-gray-900/80" : "bg-white/80")
+                }
+              >
+                <button
+                  onClick={() => setScreen("inbox")}
+                  className="flex items-center gap-2 text-blue-500"
+                >
+                  ← Back to Inbox
+                </button>
+              </div>
+              <div className="p-4">
+                {(() => {
+                  const email = emails.find((e) => e.id === selectedEmail);
+                  if (!email) {
+                    return (
+                      <div className="text-center text-sm text-gray-500">
+                        Email not found.
+                      </div>
+                    );
+                  }
+                  return (
+                    <div
+                      className={
+                        "rounded-2xl p-5 border " +
+                        (darkMode ? "bg-gray-800/50" : "bg-white/50")
+                      }
+                    >
+                      <div className="mb-4 pb-4 border-b">
+                        <p className="text-sm text-gray-500 mb-1">To:</p>
+                        <p className="font-semibold">{email.sender}</p>
+                        <p className="text-sm text-gray-600">
+                          {email.senderEmail}
+                        </p>
+                      </div>
+
+                      <h2 className="text-xl font-bold mb-4">
+                        AI-Powered Reply
+                      </h2>
+
+                      <button
+                        onClick={generateAIReply}
+                        disabled={isGenerating}
+                        className={
+                          "w-full mb-4 py-3 rounded-xl font-semibold " +
+                          (isGenerating
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white")
+                        }
+                      >
+                        {isGenerating
+                          ? "Generating AI Reply..."
+                          : "Generate AI Reply"}
+                      </button>
+
+                      <textarea
+                        value={draftReply}
+                        onChange={(e) => setDraftReply(e.target.value)}
+                        placeholder="AI reply will appear here."
+                        className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
+                      />
+                      <div className="flex gap-3 mt-4">
+                        <button
+                          onClick={copyDraftToClipboard}
+                          className="flex-1 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold"
+                        >
+                          Copy Email and Reply
+                        </button>
+                        <button
+                          onClick={() => setScreen("inbox")}
+                          className={
+                            "px-6 py-3 rounded-xl font-semibold " +
+                            (darkMode ? "bg-gray-700" : "bg-gray-200")
+                          }
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {screen === "tasks" && (
+            <div className="pb-24">
+              <div
+                className={
+                  "sticky top-0 backdrop-blur-xl border-b p-6 " +
+                  (darkMode ? "bg-gray-900/80" : "bg-white/80")
+                }
+              >
+                <h1 className="text-2xl font-bold">Tasks</h1>
+              </div>
+              <div className="p-4 space-y-3">
+                {tasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className={
+                      "rounded-2xl p-4 border " +
+                      (darkMode ? "bg-gray-800/50" : "bg-white/50")
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={task.done}
+                        onChange={() => {
+                          setTasks((prev) =>
+                            prev.map((t) =>
+                              t.id === task.id
+                                ? { ...t, done: !t.done }
+                                : t
+                            )
+                          );
+                        }}
+                        className="w-6 h-6"
+                      />
+                      <span className={task.done ? "line-through" : ""}>
+                        {task.text}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {tasks.length === 0 && (
+                  <p className="text-center text-sm text-gray-500">
+                    No tasks yet.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {screen === "calendar" && (
+            <div className="pb-24">
+              <div
+                className={
+                  "sticky top-0 backdrop-blur-xl border-b p-6 " +
+                  (darkMode ? "bg-gray-900/80" : "bg-white/80")
+                }
+              >
+                <h1 className="text-2xl font-bold">Calendar - Next 30 Days</h1>
+                <p className="text-sm text-gray-500 mt-1">
+                  {events.length} events
+                </p>
+              </div>
+              <div className="p-4 space-y-3">
+                {events.length > 0 ? (
+                  events.map((event, idx) => {
+                    const eventDate = new Date(event.start);
+                    const prevDate =
+                      idx > 0 ? new Date(events[idx - 1].start) : null;
+                    const showDate =
+                      idx === 0 ||
+                      !prevDate ||
+                      prevDate.toDateString() !== eventDate.toDateString();
+
+                    return (
+                      <div key={event.id || idx}>
+                        {showDate && (
+                          <div className="text-sm font-bold text-gray-500 mt-4 mb-2">
+                            {eventDate.toLocaleDateString("en-US", {
+                              weekday: "short",
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </div>
+                        )}
+                        <div
+                          className={
+                            "rounded-2xl p-5 border relative " +
+                            (darkMode ? "bg-gray-800/50" : "bg-white/50")
+                          }
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <h3 className="text-lg font-bold">
+                                {event.title}
+                              </h3>
+                              <p className="text-sm text-gray-500 mt-2">
+                                🕐 {formatTime(event.start)}
+                              </p>
+                              {event.location && (
+                                <p className="text-sm text-gray-500 mt-1">
+                                  📍 {event.location}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => deleteEvent(event.id)}
+                              className="text-red-500 hover:bg-red-50 p-2 rounded-lg ml-2"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-12 text-gray-500">
+                    <p>No events.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div
+            className={
+              "fixed bottom-0 left-0 right-0 border-t backdrop-blur-xl " +
+              (darkMode
+                ? "bg-gray-900/95 border-gray-800"
+                : "bg-white/95 border-gray-200")
+            }
+          >
+            <div className="flex justify-around p-4">
+              <button
+                onClick={() => setScreen("today")}
+                className={
+                  "flex flex-col items-center " +
+                  (screen === "today" ? "text-blue-500" : "text-gray-400")
+                }
+              >
+                <span className="text-2xl">🎯</span>
+                <span className="text-xs mt-1">Today</span>
+              </button>
+              <button
+                onClick={() => setScreen("inbox")}
+                className={
+                  "flex flex-col items-center " +
+                  (screen === "inbox" ? "text-blue-500" : "text-gray-400")
+                }
+              >
+                <span className="text-2xl">📧</span>
+                <span className="text-xs mt-1">Inbox</span>
+              </button>
+              <button
+                onClick={() => setScreen("tasks")}
+                className={
+                  "flex flex-col items-center " +
+                  (screen === "tasks" ? "text-blue-500" : "text-gray-400")
+                }
+              >
+                <span className="text-2xl">✅</span>
+                <span className="text-xs mt-1">Tasks</span>
+              </button>
+              <button
+                onClick={() => setScreen("calendar")}
+                className={
+                  "flex flex-col items-center " +
+                  (screen === "calendar" ? "text-blue-500" : "text-gray-400")
+                }
+              >
+                <span className="text-2xl">📅</span>
+                <span className="text-xs mt-1">Calendar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // React 18 mount
+    const rootNode = document.getElementById("root");
+    const root = ReactDOM.createRoot(rootNode);
+    root.render(<App />);
+  </script>
+</body>
+</html>
