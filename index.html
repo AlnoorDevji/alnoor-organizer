@@ -61,10 +61,13 @@
                         aiDraft: "Hi,\n\nThank you for your message.\n\nBest,\nAlnoor"
                     }));
                     
+                    console.log('Importing emails:', processed.length);
+                    console.log('Importing events:', eventData.length);
+                    
                     setEmails(processed);
-                    if (eventData.length > 0) setEvents(eventData);
+                    setEvents(eventData);
                     setShowImport(false);
-                    alert('Imported ' + processed.length + ' emails!');
+                    alert('Imported ' + processed.length + ' emails and ' + eventData.length + ' events!');
                 } catch (err) {
                     alert('Error: ' + err.message);
                 }
