@@ -37,6 +37,13 @@
         const [summary, setSummary] = useState(null);
         const [hasSmartReply, setHasSmartReply] = useState(false);
 
+        // New: action sheet for Agenda emails
+        const [activeAgendaEmail, setActiveAgendaEmail] = useState(null);
+        const [showEmailActionSheet, setShowEmailActionSheet] = useState(false);
+
+        // New: modal for events
+        const [activeEvent, setActiveEvent] = useState(null);
+
         // Helper: today key (yyyy-mm-dd)
         const getTodayKey = () => {
             const d = new Date();
@@ -97,8 +104,9 @@
         }, [events]);
 
         // Rule-based "smart reply" generator (no API)
-        const generateAIReply = () => {
-            const email = emails.find(e => e.id === selectedEmail);
+        const generateAIReply = (emailIdOverride) => {
+            const targetId = emailIdOverride ?? selectedEmail;
+            const email = emails.find(e => e.id === targetId);
             if (!email) return;
 
             setIsGenerating(true);
@@ -121,10 +129,10 @@
                 ) {
                     reply =
                         `Hi ${firstName},\n\n` +
-                        `Thank you for checking in. I’m pleased to share that your child has been making solid progress, ` +
-                        `and we’re continuing to build consistency and confidence in their work.\n\n` +
-                        `I’d be happy to walk you through recent results and next steps. ` +
-                        `If you’d like, we can schedule a brief call this week to review in more detail.\n\n` +
+                        `Thank you for checking in. I am pleased to share that your child has been making solid progress, ` +
+                        `and we are continuing to build consistency and confidence in their work.\n\n` +
+                        `I would be happy to walk you through recent results and next steps. ` +
+                        `If you would like, we can schedule a brief call this week to review in more detail.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else if (
                     tags.includes('student work') ||
@@ -134,8 +142,8 @@
                 ) {
                     reply =
                         `Hi ${firstName},\n\n` +
-                        `Thank you for sending this through. I’ve reviewed the work and appreciate the effort that went into it.\n\n` +
-                        `I’ll give more detailed feedback in our upcoming session, and we’ll use it to guide the next set of worksheets and goals.\n\n` +
+                        `Thank you for sending this through. I have reviewed the work and appreciate the effort that went into it.\n\n` +
+                        `I will give more detailed feedback in our upcoming session, and we will use it to guide the next set of worksheets and goals.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else if (
                     tags.includes('assessment') ||
@@ -146,8 +154,8 @@
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for your message regarding the assessment and schedule. ` +
-                        `We’re set up at Kumon of Davisville (2040 Yonge Street, Unit 205) and ready for the scheduled time.\n\n` +
-                        `If anything changes or you’d like to adjust the timing, please let me know or call the center at (416) 546-5051.\n\n` +
+                        `We are set up at Kumon of Davisville (2040 Yonge Street, Unit 205) and ready for the scheduled time.\n\n` +
+                        `If anything changes or you would like to adjust the timing, please let me know or call the center at (416) 546-5051.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else if (
                     subject.includes('miss') ||
@@ -159,15 +167,15 @@
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for letting me know. I hope your child is feeling better soon.\n\n` +
-                        `We can absolutely arrange a make-up plan so they stay on track. ` +
-                        `Please let me know a couple of days/times that work, or feel free to call the center at (416) 546-5051 and we’ll coordinate.\n\n` +
+                        `We can absolutely arrange a make up plan so they stay on track. ` +
+                        `Please let me know a couple of days and times that work, or feel free to call the center at (416) 546-5051 and we will coordinate.\n\n` +
                         `Warmly,\nAlnoor`;
                 } else if (tags.includes('parent contact') || tags.includes('parent communication')) {
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for reaching out and for staying engaged in your child’s learning. I really value that partnership.\n\n` +
-                        `I’d be happy to talk through your questions in more detail. ` +
-                        `If you’d like, we can schedule a quick call this week, or you can share a couple of times that work for you.\n\n` +
+                        `I would be happy to talk through your questions in more detail. ` +
+                        `If you would like, we can schedule a quick call this week, or you can share a couple of times that work for you.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else if (
                     tags.includes('vendor') ||
@@ -177,9 +185,9 @@
                 ) {
                     reply =
                         `Hi ${firstName},\n\n` +
-                        `Thank you for reaching out and sharing this. I’m currently focused on our students and center operations, ` +
-                        `but I’m open to learning more if it directly supports student outcomes or center efficiency.\n\n` +
-                        `If you could send over a brief summary of how this might help Kumon of Davisville, I’ll review it and follow up if it’s a fit.\n\n` +
+                        `Thank you for reaching out and sharing this. I am currently focused on our students and center operations, ` +
+                        `but I am open to learning more if it directly supports student outcomes or center efficiency.\n\n` +
+                        `If you could send over a brief summary of how this might help Kumon of Davisville, I will review it and follow up if it is a fit.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else if (
                     tags.includes('calendar event') ||
@@ -188,7 +196,7 @@
                 ) {
                     reply =
                         `Hi ${firstName},\n\n` +
-                        `Thank you for the reminder. This is noted on my end and I’m set for the scheduled time.\n\n` +
+                        `Thank you for the reminder. This is noted on my end and I am set for the scheduled time.\n\n` +
                         `Looking forward to it.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else if (
@@ -200,14 +208,14 @@
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for reaching out. I understand this is important and I want to address it promptly.\n\n` +
-                        `Could we schedule a quick call today or tomorrow to go through this properly? ` +
+                        `Could we schedule a quick call today or tomorrow to go through this properly. ` +
                         `Please feel free to call me directly at (416) 546-5051 or let me know a time that works for you.\n\n` +
                         `Best regards,\nAlnoor`;
                 } else {
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for your message. I appreciate you taking the time to reach out.\n\n` +
-                        `I’ll review this and follow up with more details shortly. ` +
+                        `I will review this and follow up with more details shortly. ` +
                         `If this is time sensitive, please feel free to call the centre at (416) 546-5051.\n\n` +
                         `Best regards,\nAlnoor`;
                 }
@@ -216,15 +224,14 @@
                 setHasSmartReply(true);
 
                 setEmails(emails.map(e =>
-                    e.id === selectedEmail ? { ...e, aiDraft: reply } : e
+                    e.id === targetId ? { ...e, aiDraft: reply } : e
                 ));
                 setIsGenerating(false);
             }, 1000);
         };
 
-        // Tone adjustment for draft replies – only if a smart reply exists
+        // Tone adjustment for draft replies
         const adjustTone = (mode) => {
-            if (!hasSmartReply) return;
             if (!draftReply || !draftReply.trim()) return;
 
             let text = draftReply;
@@ -237,18 +244,17 @@
                 text = text.replace(/Best regards,\s*Alnoor/gi, 'Warmly,\nAlnoor');
                 if (!text.includes('I appreciate')) {
                     text = text.replace(
-                        /\n\nI’ll review/,
-                        '\n\nI appreciate you reaching out. I’ll review'
+                        /\n\nI will review/,
+                        '\n\nI appreciate you reaching out. I will review'
                     );
                 }
             } else if (mode === 'direct') {
-                text = text.replace(/\bI’d be happy to\b/gi, 'I will');
-                text = text.replace(/\bI’d be glad to\b/gi, 'I will');
-                text = text.replace(/\bif you’d like\b/gi, '');
+                text = text.replace(/\bI would be happy to\b/gi, 'I will');
+                text = text.replace(/\bI would be glad to\b/gi, 'I will');
                 text = text.replace(/\bif you would like\b/gi, '');
                 text = text.replace(
-                    /\bI’ll review this and follow up with more details shortly\./gi,
-                    'I’ll review this and get back to you with a clear next step.'
+                    /\bI will review this and follow up with more details shortly\./gi,
+                    'I will review this and get back to you with a clear next step.'
                 );
             } else if (mode === 'formal') {
                 text = text.replace(/\bHi\b/gi, 'Hello');
@@ -257,6 +263,7 @@
             }
 
             setDraftReply(text);
+            setHasSmartReply(true);
         };
 
         const importJSON = (e) => {
@@ -284,7 +291,9 @@
                         aiDraft: item.aiDraft || '',
                         action_required: item.action_required || false,
                         priority_score: typeof item.priority_score === 'number' ? item.priority_score : null,
-                        category: item.category || null
+                        category: item.category || null,
+                        completed: item.completed || false,
+                        snoozedForToday: item.snoozedForToday || false
                     }));
 
                     const processedEvents = eventData.map(ev => ({
@@ -294,7 +303,8 @@
                         end: ev.end,
                         location: ev.location || '',
                         is_today: ev.is_today || false,
-                        is_within_3_days: ev.is_within_3_days || false
+                        is_within_3_days: ev.is_within_3_days || false,
+                        doneToday: ev.doneToday || false
                     }));
 
                     setEmails(processed);
@@ -370,7 +380,7 @@
         };
 
         const deleteEmail = (emailId) => {
-            if (confirm('Delete this email?')) {
+            if (confirm('Delete this email.')) {
                 setEmails(emails.filter(e => e.id !== emailId));
                 if (selectedEmail === emailId) {
                     setSelectedEmail(null);
@@ -380,9 +390,22 @@
         };
 
         const deleteEvent = (eventId) => {
-            if (confirm('Delete this event?')) {
+            if (confirm('Delete this event.')) {
                 setEvents(events.filter(e => e.id !== eventId));
             }
+        };
+
+        // Email agenda helpers
+        const markEmailCompleted = (emailId) => {
+            setEmails(emails.map(e =>
+                e.id === emailId ? { ...e, completed: true } : e
+            ));
+        };
+
+        const snoozeEmailForToday = (emailId) => {
+            setEmails(emails.map(e =>
+                e.id === emailId ? { ...e, snoozedForToday: true } : e
+            ));
         };
 
         // Task helpers
@@ -456,6 +479,35 @@
             ));
         };
 
+        // Event helpers for modal
+        const markEventDoneToday = (eventId) => {
+            setEvents(events.map(ev =>
+                ev.id === eventId ? { ...ev, doneToday: true } : ev
+            ));
+            setActiveEvent(null);
+        };
+
+        const rescheduleEvent = (eventId) => {
+            const ev = events.find(e => e.id === eventId);
+            if (!ev) return;
+
+            const current = ev.start ? ev.start.slice(0, 16) : '';
+            const input = prompt('Enter new start (YYYY-MM-DDTHH:MM)', current);
+            if (!input) return;
+
+            const d = new Date(input);
+            if (isNaN(d.getTime())) {
+                alert('Invalid date and time.');
+                return;
+            }
+            const iso = d.toISOString();
+
+            setEvents(events.map(e =>
+                e.id === eventId ? { ...e, start: iso } : e
+            ));
+            setActiveEvent(null);
+        };
+
         const formatTime = (dateStr) => {
             if (!dateStr) return '';
             const d = new Date(dateStr);
@@ -487,6 +539,9 @@
         });
 
         const isActionEmail = (email) => {
+            if (email.completed) return false;
+            if (email.snoozedForToday) return false;
+
             const tags = Array.isArray(email.tags) ? email.tags : [];
             const hasActionTag = tags.includes('Action Required') || tags.includes('high priority');
             const hasFlag = email.action_required === true;
@@ -507,6 +562,7 @@
 
         const agendaEventsToday = events
             .filter(ev => {
+                if (ev.doneToday) return false;
                 if (ev.is_today) return true;
                 if (ev.start && ev.start.slice(0, 10) === todayKey) return true;
                 return false;
@@ -526,6 +582,10 @@
         const rootClass = darkMode
             ? 'bg-gray-900 text-white min-h-screen'
             : 'bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen';
+
+        const showToneControls =
+            hasSmartReply ||
+            (draftReply && draftReply.trim() && draftReply !== PLACEHOLDER_REPLY);
 
         return (
             <div className={rootClass}>
@@ -552,6 +612,124 @@
                     <div
                         className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50">
                         ✅ Copied to clipboard!
+                    </div>
+                )}
+
+                {/* Email action sheet for Agenda */}
+                {activeAgendaEmail && showEmailActionSheet && (
+                    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
+                        <div className={`w-full max-w-md rounded-t-3xl p-4 ${darkMode ? 'bg-gray-900' : 'bg-white'}`}>
+                            <div className="mb-3">
+                                <p className="text-xs text-gray-500">Email</p>
+                                <p className="text-sm font-semibold">{activeAgendaEmail.subject}</p>
+                                <p className="text-xs text-gray-500 mt-1">{activeAgendaEmail.sender}</p>
+                            </div>
+                            <div className="space-y-2">
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-gray-100"
+                                    onClick={() => {
+                                        const email = activeAgendaEmail;
+                                        setSelectedEmail(email.id);
+                                        if (email.aiDraft) {
+                                            setDraftReply(email.aiDraft);
+                                            setHasSmartReply(true);
+                                        } else {
+                                            setDraftReply(PLACEHOLDER_REPLY);
+                                            setHasSmartReply(false);
+                                        }
+                                        setShowEmailActionSheet(false);
+                                        setActiveAgendaEmail(null);
+                                        setScreen('draft');
+                                    }}
+                                >
+                                    Open email
+                                </button>
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-blue-500 text-white"
+                                    onClick={() => {
+                                        const email = activeAgendaEmail;
+                                        setSelectedEmail(email.id);
+                                        setDraftReply(PLACEHOLDER_REPLY);
+                                        setHasSmartReply(false);
+                                        setShowEmailActionSheet(false);
+                                        setActiveAgendaEmail(null);
+                                        setScreen('draft');
+                                        setTimeout(() => generateAIReply(email.id), 0);
+                                    }}
+                                >
+                                    Generate smart reply
+                                </button>
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-green-100 text-green-700"
+                                    onClick={() => {
+                                        markEmailCompleted(activeAgendaEmail.id);
+                                        setShowEmailActionSheet(false);
+                                        setActiveAgendaEmail(null);
+                                    }}
+                                >
+                                    Mark completed
+                                </button>
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-yellow-100 text-yellow-700"
+                                    onClick={() => {
+                                        snoozeEmailForToday(activeAgendaEmail.id);
+                                        setShowEmailActionSheet(false);
+                                        setActiveAgendaEmail(null);
+                                    }}
+                                >
+                                    Snooze for today
+                                </button>
+                            </div>
+                            <button
+                                className="w-full mt-3 py-2 rounded-xl text-sm font-medium bg-gray-200"
+                                onClick={() => {
+                                    setShowEmailActionSheet(false);
+                                    setActiveAgendaEmail(null);
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Event modal */}
+                {activeEvent && (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                        <div className={`w-full max-w-md rounded-3xl p-5 ${darkMode ? 'bg-gray-900' : 'bg-white'}`}>
+                            <h2 className="text-lg font-semibold mb-2">{activeEvent.title}</h2>
+                            <p className="text-sm text-gray-500 mb-1">
+                                {activeEvent.start ? formatDate(activeEvent.start) : ''} {activeEvent.start ? 'at ' + formatTime(activeEvent.start) : ''}
+                            </p>
+                            {activeEvent.location && (
+                                <p className="text-sm text-gray-500 mb-3">
+                                    📍 {activeEvent.location}
+                                </p>
+                            )}
+                            {activeEvent.doneToday && (
+                                <p className="text-xs text-green-600 mb-2">Marked done for today.</p>
+                            )}
+                            <div className="space-y-2 mt-2">
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-green-500 text-white"
+                                    onClick={() => markEventDoneToday(activeEvent.id)}
+                                >
+                                    Mark done today
+                                </button>
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-blue-500 text-white"
+                                    onClick={() => rescheduleEvent(activeEvent.id)}
+                                >
+                                    Reschedule
+                                </button>
+                                <button
+                                    className="w-full py-2 rounded-xl text-sm font-medium bg-gray-200"
+                                    onClick={() => setActiveEvent(null)}
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -625,15 +803,8 @@
                                         key={email.id}
                                         className={`rounded-xl p-3 border cursor-pointer ${darkMode ? 'bg-gray-900/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}
                                         onClick={() => {
-                                            setSelectedEmail(email.id);
-                                            if (email.aiDraft) {
-                                                setDraftReply(email.aiDraft);
-                                                setHasSmartReply(true);
-                                            } else {
-                                                setDraftReply(PLACEHOLDER_REPLY);
-                                                setHasSmartReply(false);
-                                            }
-                                            setScreen('draft');
+                                            setActiveAgendaEmail(email);
+                                            setShowEmailActionSheet(true);
                                         }}
                                     >
                                         <div className="flex justify-between items-start gap-2">
@@ -666,130 +837,129 @@
                         </div>
 
                         {/* Tasks */}
-<div
-    className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
-    
-    <div className="flex items-center justify-between mb-2">
-        <h2 className="text-lg font-semibold">✅ Today’s Tasks</h2>
-        <span className="text-xs text-gray-500">
-            {tasksToday.length} due today, {tasksOverdue.length} overdue
-        </span>
-    </div>
+                        <div
+                            className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
 
-    {/* Overdue tasks */}
-    {tasksOverdue.length > 0 && (
-        <div className="mb-3">
-            <p className="text-xs text-red-500 mb-1">Overdue</p>
+                            <div className="flex items-center justify-between mb-2">
+                                <h2 className="text-lg font-semibold">✅ Today’s Tasks</h2>
+                                <span className="text-xs text-gray-500">
+                                    {tasksToday.length} due today, {tasksOverdue.length} overdue
+                                </span>
+                            </div>
 
-            <div className="space-y-1">
-                {tasksOverdue.slice(0, 4).map(task => (
-                    <div
-                        key={task.id}
-                        className="flex items-center justify-between rounded-xl px-3 py-2 bg-red-50">
+                            {/* Overdue tasks */}
+                            {tasksOverdue.length > 0 && (
+                                <div className="mb-3">
+                                    <p className="text-xs text-red-500 mb-1">Overdue</p>
 
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="checkbox"
-                                checked={task.done}
-                                onChange={() => toggleTaskDone(task.id)}
-                                className="w-4 h-4"
-                            />
-                            <div>
-                                <p className="text-sm font-medium text-red-700">
-                                    {task.text}
-                                </p>
-                                <p className="text-[11px] text-red-500">
-                                    Due {formatDateHuman(task.dueDate)}
-                                </p>
+                                    <div className="space-y-1">
+                                        {tasksOverdue.slice(0, 4).map(task => (
+                                            <div
+                                                key={task.id}
+                                                className="flex items-center justify-between rounded-xl px-3 py-2 bg-red-50">
+
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={task.done}
+                                                        onChange={() => toggleTaskDone(task.id)}
+                                                        className="w-4 h-4"
+                                                    />
+                                                    <div>
+                                                        <p className="text-sm font-medium text-red-700">
+                                                            {task.text}
+                                                        </p>
+                                                        <p className="text-[11px] text-red-500">
+                                                            Due {formatDateHuman(task.dueDate)}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => rescheduleTask(task.id, 'tomorrow')}
+                                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                        Tomorrow
+                                                    </button>
+                                                    <button
+                                                        onClick={() => rescheduleTask(task.id, 'weekend')}
+                                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                        Weekend
+                                                    </button>
+                                                    <button
+                                                        onClick={() => rescheduleTask(task.id, 'nextWeek')}
+                                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                        Next week
+                                                    </button>
+                                                    <button
+                                                        onClick={() => rescheduleTask(task.id, 'pick')}
+                                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                        Pick date
+                                                    </button>
+                                                </div>
+
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Today’s tasks */}
+                            <div className="space-y-2">
+                                {tasksToday.length === 0 && (
+                                    <p className="text-sm text-gray-500">No tasks due today.</p>
+                                )}
+
+                                {tasksToday.map(task => (
+                                    <div
+                                        key={task.id}
+                                        className="flex items-center justify-between rounded-xl px-3 py-2 bg-gray-50">
+
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={task.done}
+                                                onChange={() => toggleTaskDone(task.id)}
+                                                className="w-4 h-4"
+                                            />
+                                            <div>
+                                                <p className="text-sm font-medium">
+                                                    {task.text}
+                                                </p>
+                                                <p className="text-[11px] text-gray-500">
+                                                    Due today
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-col gap-1">
+                                            <button
+                                                onClick={() => rescheduleTask(task.id, 'tomorrow')}
+                                                className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                                Tomorrow
+                                            </button>
+                                            <button
+                                                onClick={() => rescheduleTask(task.id, 'weekend')}
+                                                className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                                                Weekend
+                                            </button>
+                                            <button
+                                                onClick={() => rescheduleTask(task.id, 'nextWeek')}
+                                                className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                                                Next week
+                                            </button>
+                                            <button
+                                                onClick={() => rescheduleTask(task.id, 'pick')}
+                                                className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                                Pick date
+                                            </button>
+                                        </div>
+
+                                    </div>
+                                ))}
                             </div>
                         </div>
 
-                        {/* FULL RESCHEDULE MENU — AGENDA VIEW */}
-                        <div className="flex flex-col gap-1">
-                            <button
-                                onClick={() => rescheduleTask(task.id, 'tomorrow')}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                                Tomorrow
-                            </button>
-                            <button
-                                onClick={() => rescheduleTask(task.id, 'weekend')}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                                Weekend
-                            </button>
-                            <button
-                                onClick={() => rescheduleTask(task.id, 'nextWeek')}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                                Next week
-                            </button>
-                            <button
-                                onClick={() => rescheduleTask(task.id, 'pick')}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                                Pick date
-                            </button>
-                        </div>
-
-                    </div>
-                ))}
-            </div>
-        </div>
-    )}
-
-    {/* Today’s tasks */}
-    <div className="space-y-2">
-        {tasksToday.length === 0 && (
-            <p className="text-sm text-gray-500">No tasks due today.</p>
-        )}
-
-        {tasksToday.map(task => (
-            <div
-                key={task.id}
-                className="flex items-center justify-between rounded-xl px-3 py-2 bg-gray-50">
-
-                <div className="flex items-center gap-2">
-                    <input
-                        type="checkbox"
-                        checked={task.done}
-                        onChange={() => toggleTaskDone(task.id)}
-                        className="w-4 h-4"
-                    />
-                    <div>
-                        <p className="text-sm font-medium">
-                            {task.text}
-                        </p>
-                        <p className="text-[11px] text-gray-500">
-                            Due today
-                        </p>
-                    </div>
-                </div>
-
-                {/* FULL RESCHEDULE MENU — AGENDA VIEW */}
-                <div className="flex flex-col gap-1">
-                    <button
-                        onClick={() => rescheduleTask(task.id, 'tomorrow')}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                        Tomorrow
-                    </button>
-                    <button
-                        onClick={() => rescheduleTask(task.id, 'weekend')}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                        Weekend
-                    </button>
-                    <button
-                        onClick={() => rescheduleTask(task.id, 'nextWeek')}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                        Next week
-                    </button>
-                    <button
-                        onClick={() => rescheduleTask(task.id, 'pick')}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                        Pick date
-                    </button>
-                </div>
-
-            </div>
-        ))}
-    </div>
-</div>
                         {/* Events */}
                         <div
                             className={`rounded-2xl p-4 border mb-20 ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
@@ -804,7 +974,8 @@
                                 {agendaEventsToday.map(ev => (
                                     <div
                                         key={ev.id}
-                                        className={`rounded-xl p-3 border ${darkMode ? 'bg-gray-900/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}
+                                        className={`rounded-xl p-3 border cursor-pointer ${darkMode ? 'bg-gray-900/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}
+                                        onClick={() => setActiveEvent(ev)}
                                     >
                                         <p className="text-sm font-semibold">{ev.title}</p>
                                         <p className="text-xs text-gray-500 mt-1">
@@ -940,7 +1111,7 @@
                                             <h2 className="text-xl font-bold mb-3">🤖 Smart Reply</h2>
 
                                             <button
-                                                onClick={generateAIReply}
+                                                onClick={() => generateAIReply()}
                                                 disabled={isGenerating}
                                                 className={`w-full mb-4 py-3 rounded-xl font-semibold ${
                                                     isGenerating
@@ -953,12 +1124,17 @@
 
                                             <textarea
                                                 value={draftReply}
-                                                onChange={(e) => setDraftReply(e.target.value)}
+                                                onChange={(e) => {
+                                                    setDraftReply(e.target.value);
+                                                    if (e.target.value && e.target.value.trim() && e.target.value !== PLACEHOLDER_REPLY) {
+                                                        setHasSmartReply(true);
+                                                    }
+                                                }}
                                                 placeholder={PLACEHOLDER_REPLY}
                                                 className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
                                             />
 
-                                            {hasSmartReply && (
+                                            {showToneControls && (
                                                 <div className="flex flex-wrap gap-2 mt-3">
                                                     <span className="text-xs text-gray-500 mr-2">Edit tone:</span>
                                                     <button
@@ -1120,10 +1296,17 @@
                                                     </div>
                                                 )}
                                                 <div
-                                                    className={`rounded-2xl p-4 border relative ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                                                    className={`rounded-2xl p-4 border relative cursor-pointer ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}
+                                                    onClick={() => setActiveEvent(event)}
+                                                >
                                                     <div className="flex justify-between items-start">
                                                         <div className="flex-1">
-                                                            <h3 className="text-sm font-bold">{event.title}</h3>
+                                                            <h3 className="text-sm font-bold">
+                                                                {event.title}
+                                                                {event.doneToday && (
+                                                                    <span className="ml-2 text-xs text-green-600">(done)</span>
+                                                                )}
+                                                            </h3>
                                                             <p className="text-xs text-gray-500 mt-1">
                                                                 🕐 {formatTime(event.start)}
                                                             </p>
@@ -1134,7 +1317,10 @@
                                                             )}
                                                         </div>
                                                         <button
-                                                            onClick={() => deleteEvent(event.id)}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                deleteEvent(event.id);
+                                                            }}
                                                             className="text-red-500 hover:bg-red-50 p-2 rounded-lg ml-2 text-xs">
                                                             🗑️
                                                         </button>
