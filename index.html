@@ -488,25 +488,40 @@
         };
 
         const rescheduleEvent = (eventId) => {
-            const ev = events.find(e => e.id === eventId);
-            if (!ev) return;
+    const ev = events.find(e => e.id === eventId);
+    if (!ev) return;
 
-            const current = ev.start ? ev.start.slice(0, 16) : '';
-            const input = prompt('Enter new start (YYYY-MM-DDTHH:MM)', current);
-            if (!input) return;
+    // Create container for the picker
+    const picker = document.createElement('input');
+    picker.type = 'datetime-local';
+    picker.value = ev.start ? ev.start.slice(0, 16) : '';
+    picker.style.position = 'fixed';
+    picker.style.left = '-9999px';
+    document.body.appendChild(picker);
 
-            const d = new Date(input);
-            if (isNaN(d.getTime())) {
-                alert('Invalid date and time.');
-                return;
-            }
-            const iso = d.toISOString();
+    // Simulate a click to bring up iOS date/time picker
+    picker.click();
 
-            setEvents(events.map(e =>
-                e.id === eventId ? { ...e, start: iso } : e
-            ));
-            setActiveEvent(null);
-        };
+    picker.addEventListener('change', () => {
+        const newVal = picker.value;
+        document.body.removeChild(picker);
+
+        if (!newVal) return;
+
+        const d = new Date(newVal);
+        if (isNaN(d.getTime())) {
+            alert('Invalid date.');
+            return;
+        }
+
+        const iso = d.toISOString();
+
+        setEvents(events.map(e =>
+            e.id === eventId ? { ...e, start: iso } : e
+        ));
+        setActiveEvent(null);
+    });
+};
 
         const formatTime = (dateStr) => {
             if (!dateStr) return '';
