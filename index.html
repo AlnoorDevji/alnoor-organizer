@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Day Organizer">
@@ -16,12 +16,25 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
+
+        // If you set this to your Dropbox JSON link, the app will try to auto-import on load.
+        // Example: const REMOTE_JSON_URL = "https://www.dropbox.com/s/xxxxxx/today.json?dl=1";
+        const REMOTE_JSON_URL = null;
+
+        function isSameDay(dateStr, refDate = new Date()) {
+            if (!dateStr) return false;
+            const d = new Date(dateStr);
+            return d.getFullYear() === refDate.getFullYear() &&
+                   d.getMonth() === refDate.getMonth() &&
+                   d.getDate() === refDate.getDate();
+        }
 
         function App() {
             const [emails, setEmails] = useState([]);
             const [tasks, setTasks] = useState([]);
             const [events, setEvents] = useState([]);
+            const [trash, setTrash] = useState([]);
             const [screen, setScreen] = useState('today');
             const [darkMode, setDarkMode] = useState(false);
             const [selectedEmail, setSelectedEmail] = useState(null);
@@ -31,33 +44,125 @@
             const [showCopySuccess, setShowCopySuccess] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
 
+            // Undo state
+            const [showUndo, setShowUndo] = useState(false);
+            const [undoInfo, setUndoInfo] = useState(null); // { type: 'fromInbox' | 'hardDelete', email }
+            const undoTimeoutRef = useRef(null);
+
+            // Swipe tracking
+            const touchStartXRef = useRef(null);
+
+            // Reschedule modal state
+            const [rescheduleTarget, setRescheduleTarget] = useState(null); // {type: 'task'|'email'|'event', id}
+            const [rescheduleDate, setRescheduleDate] = useState('');
+            const [rescheduleTime, setRescheduleTime] = useState('');
+
             useEffect(() => {
                 const savedEmails = localStorage.getItem('dayorganizer-emails');
                 const savedTasks = localStorage.getItem('dayorganizer-tasks');
                 const savedEvents = localStorage.getItem('dayorganizer-events');
+                const savedTrash = localStorage.getItem('dayorganizer-trash-emails');
                 
                 if (savedEmails) setEmails(JSON.parse(savedEmails));
                 if (savedTasks) setTasks(JSON.parse(savedTasks));
                 if (savedEvents) setEvents(JSON.parse(savedEvents));
+                if (savedTrash) setTrash(JSON.parse(savedTrash));
+            }, []);
+
+            // Optional remote JSON auto import
+            useEffect(() => {
+                const fetchRemote = async () => {
+                    if (!REMOTE_JSON_URL) return;
+                    try {
+                        const res = await fetch(REMOTE_JSON_URL, { cache: 'no-store' });
+                        if (!res.ok) {
+                            console.warn('Remote JSON fetch failed with status', res.status);
+                            return;
+                        }
+                        const data = await res.json();
+                        const emailData = Array.isArray(data) ? data : (data.emails || []);
+                        const eventData = data.events || [];
+                        const processed = emailData.map((item, i) => ({
+                            id: Date.now() + i,
+                            sender: (item.sender || '').replace(/<.*>/, '').trim(),
+                            senderEmail: (item.sender || '').match(/<(.+?)>/)?.[1] || item.sender || '',
+                            subject: item.subject || '',
+                            preview: item.preview || '',
+                            date: item.received_at || new Date().toISOString(),
+                            priority: item.tags?.includes('Action Required') ? 'High' : 'Medium',
+                            tags: item.tags || [],
+                            aiDraft: item.aiDraft || '',
+                            followUpAt: item.followUpAt || null
+                        }));
+                        setEmails(processed);
+                        setEvents(eventData);
+                    } catch (e) {
+                        console.warn('Remote JSON fetch error', e);
+                    }
+                };
+                fetchRemote();
             }, []);
 
             useEffect(() => {
                 if (emails.length > 0) {
                     localStorage.setItem('dayorganizer-emails', JSON.stringify(emails));
+                } else {
+                    localStorage.removeItem('dayorganizer-emails');
                 }
             }, [emails]);
 
             useEffect(() => {
                 if (tasks.length > 0) {
                     localStorage.setItem('dayorganizer-tasks', JSON.stringify(tasks));
+                } else {
+                    localStorage.removeItem('dayorganizer-tasks');
                 }
             }, [tasks]);
 
             useEffect(() => {
                 if (events.length > 0) {
                     localStorage.setItem('dayorganizer-events', JSON.stringify(events));
+                } else {
+                    localStorage.removeItem('dayorganizer-events');
                 }
             }, [events]);
+
+            useEffect(() => {
+                if (trash.length > 0) {
+                    localStorage.setItem('dayorganizer-trash-emails', JSON.stringify(trash));
+                } else {
+                    localStorage.removeItem('dayorganizer-trash-emails');
+                }
+            }, [trash]);
+
+            const triggerUndo = (info) => {
+                setUndoInfo(info);
+                setShowUndo(true);
+                if (undoTimeoutRef.current) {
+                    clearTimeout(undoTimeoutRef.current);
+                }
+                undoTimeoutRef.current = setTimeout(() => {
+                    setShowUndo(false);
+                    setUndoInfo(null);
+                }, 5000);
+            };
+
+            const handleUndo = () => {
+                if (!undoInfo) return;
+
+                if (undoInfo.type === 'fromInbox') {
+                    setTrash(prev => prev.filter(e => e.id !== undoInfo.email.id));
+                    setEmails(prev => [undoInfo.email, ...prev]);
+                } else if (undoInfo.type === 'hardDelete') {
+                    setTrash(prev => [undoInfo.email, ...prev]);
+                }
+
+                setShowUndo(false);
+                setUndoInfo(null);
+                if (undoTimeoutRef.current) {
+                    clearTimeout(undoTimeoutRef.current);
+                }
+            };
 
             const generateAIReply = () => {
                 const email = emails.find(e => e.id === selectedEmail);
@@ -65,61 +170,79 @@
 
                 setIsGenerating(true);
 
-                // Simulate processing time for better UX
                 setTimeout(() => {
-                    const firstName = email.sender.split(' ')[0];
-                    const subject = email.subject.toLowerCase();
-                    const preview = email.preview.toLowerCase();
+                    const firstName = (email.sender || '').split(' ')[0] || 'there';
+                    const subject = (email.subject || '').toLowerCase();
+                    const preview = (email.preview || '').toLowerCase();
                     const tags = email.tags ? email.tags.map(t => t.toLowerCase()) : [];
                     
                     let reply = '';
                     
-                    // Parent Progress Inquiry
-                    if (subject.includes('progress') || subject.includes('how is') || preview.includes('progress') || preview.includes('doing')) {
-                        reply = `Hi ${firstName},\n\nThank you for checking in! I'm pleased to share that your child has been making wonderful progress. They've shown consistent improvement in their recent work and are demonstrating strong understanding of the concepts we're covering.\n\nI'd love to discuss their development in more detail. Would you be available for a brief call this week? I can share specific examples of their growth and discuss our next steps.\n\nBest regards,\nAlnoor`;
-                    }
-                    // Student Work Submission
-                    else if (tags.includes('student work') || subject.includes('essay') || subject.includes('homework') || subject.includes('assignment')) {
-                        reply = `Hi ${firstName},\n\nThank you for sharing this work with me. I've reviewed it and I'm impressed with the effort and thought that went into it.\n\nI'll provide detailed feedback during our next session. Please feel free to reach out if you have any questions in the meantime.\n\nBest regards,\nAlnoor`;
-                    }
-                    // Assessment/Scheduling
-                    else if (tags.includes('assessment') || subject.includes('assessment') || subject.includes('schedule') || subject.includes('appointment')) {
-                        reply = `Hi ${firstName},\n\nThank you for reaching out regarding the assessment. I have everything prepared and I'm looking forward to the session.\n\nThe assessment will be held at our center (2040 Yonge Street Unit 205, Toronto) at the scheduled time. Please don't hesitate to call if you have any questions: (416) 546-5051.\n\nBest regards,\nAlnoor`;
-                    }
-                    // Missed Class/Absence
-                    else if (subject.includes('miss') || subject.includes('absent') || subject.includes('sick') || preview.includes('not attending') || preview.includes('unable to')) {
-                        reply = `Hi ${firstName},\n\nThank you for letting me know. I hope your child feels better soon!\n\nWe can definitely arrange a make-up session. I have availability later this week or next week. Would any of those times work for you? Feel free to call the center at (416) 546-5051 to schedule.\n\nWarmly,\nAlnoor`;
-                    }
-                    // Parent Communication / General Question
-                    else if (tags.includes('parent contact') || tags.includes('parent communication')) {
-                        reply = `Hi ${firstName},\n\nThank you for reaching out. I appreciate your engagement in your child's learning journey.\n\nI'd be happy to discuss this with you in detail. Would you be available for a brief call this week? Alternatively, feel free to stop by the center and we can chat in person.\n\nBest regards,\nAlnoor`;
-                    }
-                    // Vendor/Business Outreach
-                    else if (tags.includes('vendor outreach') || preview.includes('available to connect') || preview.includes('scheduling link')) {
-                        reply = `Hi ${firstName},\n\nThank you for reaching out. I'd be interested in learning more about how this could benefit our center and students.\n\nI'm currently focused on our students but would be open to a brief conversation. Could you send me some additional information about your offering?\n\nBest regards,\nAlnoor`;
-                    }
-                    // Calendar/Event Notification
-                    else if (tags.includes('calendar event') || subject.includes('notification:') || subject.includes('reminder')) {
-                        reply = `Hi ${firstName},\n\nThank you for the reminder. I have this event noted on my calendar and everything is prepared.\n\nLooking forward to it!\n\nBest regards,\nAlnoor`;
-                    }
-                    // High Priority / Urgent
-                    else if (email.priority === 'High' || subject.includes('urgent') || subject.includes('asap') || subject.includes('important')) {
-                        reply = `Hi ${firstName},\n\nThank you for reaching out. I understand this is important and I want to address it promptly.\n\nCould we schedule a call today or tomorrow to discuss this? Please call me directly at (416) 546-5051 or let me know a time that works best for you.\n\nBest regards,\nAlnoor`;
-                    }
-                    // Generic/Default Response
-                    else {
-                        reply = `Hi ${firstName},\n\nThank you for your message. I appreciate you reaching out to me.\n\nI'll review this and get back to you shortly with more details. If this is time-sensitive, please feel free to call the center at (416) 546-5051.\n\nBest regards,\nAlnoor`;
+                    if (
+                        subject.includes('progress') || 
+                        subject.includes('how is') || 
+                        preview.includes('progress') || 
+                        preview.includes('doing')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for checking in. I am pleased to share that your child has been making meaningful progress. They have been improving in their recent work and are showing stronger understanding of the concepts we are covering.\n\nI would be happy to walk you through specific examples and our next steps. Would you be available for a brief call this week.\n\nBest regards,\nAlnoor`;
+                    } else if (
+                        tags.includes('student work') || 
+                        subject.includes('essay') || 
+                        subject.includes('homework') || 
+                        subject.includes('assignment')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for sharing this work with me. I appreciate the effort that went into it.\n\nI will review it in more detail and provide feedback during our next session. If you have any specific questions in the meantime, please let me know.\n\nBest regards,\nAlnoor`;
+                    } else if (
+                        tags.includes('assessment') || 
+                        subject.includes('assessment') || 
+                        subject.includes('schedule') || 
+                        subject.includes('appointment')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for reaching out about the assessment. Everything is set on my end and I am looking forward to seeing your child.\n\nThe assessment will be held at our centre at 2040 Yonge Street Unit 205. If anything changes or you have questions before then, please call the centre at (416) 546-5051.\n\nBest regards,\nAlnoor`;
+                    } else if (
+                        subject.includes('miss') || 
+                        subject.includes('absent') || 
+                        subject.includes('sick') || 
+                        preview.includes('not attending') || 
+                        preview.includes('unable to')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for letting me know. I hope your child feels better soon.\n\nWe can arrange a make up session so they stay on track. Please let me know what days work well for you, or call the centre at (416) 546-5051 and we can book a time.\n\nWarmly,\nAlnoor`;
+                    } else if (
+                        tags.includes('parent contact') || 
+                        tags.includes('parent communication')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for reaching out and staying engaged in your child's learning.\n\nI would be happy to go over this with you in more detail. We can schedule a brief call or you are welcome to stop by the centre so we can talk through the plan together.\n\nBest regards,\nAlnoor`;
+                    } else if (
+                        tags.includes('vendor outreach') || 
+                        preview.includes('available to connect') || 
+                        preview.includes('scheduling link')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for reaching out. I appreciate you thinking of our centre.\n\nI am focused on our current students and operations, but I am open to learning more. Please send over a brief overview of how this could support our students or centre, and I will review it.\n\nBest regards,\nAlnoor`;
+                    } else if (
+                        tags.includes('calendar event') || 
+                        subject.includes('notification:') || 
+                        subject.includes('reminder')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for the reminder. I have this noted and everything is in place on my end.\n\nLooking forward to it.\n\nBest regards,\nAlnoor`;
+                    } else if (
+                        email.priority === 'High' || 
+                        subject.includes('urgent') || 
+                        subject.includes('asap') || 
+                        subject.includes('important')
+                    ) {
+                        reply = `Hi ${firstName},\n\nThank you for reaching out. I understand this is important and I want to make sure we address it properly.\n\nCould we schedule a quick call today or tomorrow to go through this. You can reach me at (416) 546-5051 or let me know a time that works for you.\n\nBest regards,\nAlnoor`;
+                    } else {
+                        reply = `Hi ${firstName},\n\nThank you for your message. I appreciate you taking the time to reach out.\n\nI will review this and follow up with more details shortly. If this is time sensitive, please feel free to call the centre at (416) 546-5051.\n\nBest regards,\nAlnoor`;
                     }
                     
                     setDraftReply(reply);
-                    
-                    // Save the generated draft back to the email
-                    setEmails(emails.map(e => 
-                        e.id === selectedEmail ? {...e, aiDraft: reply} : e
-                    ));
-                    
+                    setEmails(prev =>
+                        prev.map(e => 
+                            e.id === selectedEmail ? { ...e, aiDraft: reply } : e
+                        )
+                    );
                     setIsGenerating(false);
-                }, 1500); // 1.5 second delay to simulate AI processing
+                }, 1500);
             };
 
             const importJSON = (e) => {
@@ -135,22 +258,23 @@
                         
                         const processed = emailData.map((item, i) => ({
                             id: Date.now() + i,
-                            sender: item.sender.replace(/<.*>/, '').trim(),
-                            senderEmail: item.sender.match(/<(.+?)>/)?.[1] || item.sender,
-                            subject: item.subject,
-                            preview: item.preview,
-                            date: item.received_at,
+                            sender: (item.sender || '').replace(/<.*>/, '').trim(),
+                            senderEmail: (item.sender || '').match(/<(.+?)>/)?.[1] || item.sender || '',
+                            subject: item.subject || '',
+                            preview: item.preview || '',
+                            date: item.received_at || new Date().toISOString(),
                             priority: item.tags?.includes('Action Required') ? 'High' : 'Medium',
-                            tags: item.tags,
-                            aiDraft: '' // Will be generated on demand
+                            tags: item.tags || [],
+                            aiDraft: item.aiDraft || '',
+                            followUpAt: item.followUpAt || null
                         }));
                         
                         setEmails(processed);
                         setEvents(eventData);
                         setShowImport(false);
-                        alert('✅ Imported ' + processed.length + ' emails and ' + eventData.length + ' events!');
+                        alert('Imported ' + processed.length + ' emails and ' + eventData.length + ' events.');
                     } catch (err) {
-                        alert('❌ Error: ' + err.message);
+                        alert('Error: ' + err.message);
                     }
                 };
                 reader.readAsText(file);
@@ -162,7 +286,6 @@
                 
                 const textToCopy = `To: ${email.senderEmail}\n\n${draftReply}`;
                 
-                // Try modern clipboard API first
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     try {
                         await navigator.clipboard.writeText(textToCopy);
@@ -174,7 +297,6 @@
                     }
                 }
                 
-                // iOS fallback method
                 const textArea = document.createElement('textarea');
                 textArea.value = textToCopy;
                 textArea.style.position = 'fixed';
@@ -192,7 +314,6 @@
                 
                 document.body.appendChild(textArea);
                 
-                // iOS specific selection
                 const range = document.createRange();
                 range.selectNodeContents(textArea);
                 const selection = window.getSelection();
@@ -216,26 +337,56 @@
             };
 
             const deleteEmail = (emailId) => {
-                if (confirm('Delete this email?')) {
-                    setEmails(emails.filter(e => e.id !== emailId));
-                    if (selectedEmail === emailId) {
-                        setScreen('inbox');
-                    }
+                const email = emails.find(e => e.id === emailId);
+                if (!email) return;
+
+                if (!confirm('Move this email to Trash.')) return;
+
+                setEmails(prev => prev.filter(e => e.id !== emailId));
+                setTrash(prev => [email, ...prev]);
+
+                if (selectedEmail === emailId) {
+                    setSelectedEmail(null);
+                    setScreen('inbox');
                 }
+
+                triggerUndo({ type: 'fromInbox', email });
+            };
+
+            const restoreFromTrash = (emailId) => {
+                const email = trash.find(e => e.id === emailId);
+                if (!email) return;
+
+                setTrash(prev => prev.filter(e => e.id !== emailId));
+                setEmails(prev => [email, ...prev]);
+            };
+
+            const hardDeleteFromTrash = (emailId) => {
+                const email = trash.find(e => e.id === emailId);
+                if (!email) return;
+
+                if (!confirm('Permanently delete this email from Trash. This can only be undone using the Undo button immediately after.')) {
+                    return;
+                }
+
+                setTrash(prev => prev.filter(e => e.id !== emailId));
+                triggerUndo({ type: 'hardDelete', email });
             };
 
             const deleteEvent = (eventId) => {
-                if (confirm('Delete this event?')) {
+                if (confirm('Delete this event.')) {
                     setEvents(events.filter(e => e.id !== eventId));
                 }
             };
 
             const formatTime = (dateStr) => {
+                if (!dateStr) return '';
                 const d = new Date(dateStr);
                 return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
             };
 
             const formatDate = (dateStr) => {
+                if (!dateStr) return '';
                 const d = new Date(dateStr);
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             };
@@ -243,13 +394,97 @@
             const filteredEmails = emails.filter(e => {
                 if (!searchQuery) return true;
                 const q = searchQuery.toLowerCase();
-                return e.sender.toLowerCase().includes(q) || 
-                       e.subject.toLowerCase().includes(q) ||
-                       e.preview.toLowerCase().includes(q);
+                return (e.sender || '').toLowerCase().includes(q) || 
+                       (e.subject || '').toLowerCase().includes(q) ||
+                       (e.preview || '').toLowerCase().includes(q);
             });
+
+            const isActionEmail = (email) => {
+                const subject = (email.subject || '').toLowerCase();
+                const preview = (email.preview || '').toLowerCase();
+                const tags = email.tags || [];
+                return email.priority === 'High' ||
+                       tags.includes('Action Required') ||
+                       subject.includes('reply') ||
+                       preview.includes('let me know') ||
+                       preview.includes('can you') ||
+                       email.followUpAt;
+            };
+
+            const today = new Date();
+
+            const agendaEmails = emails.filter(e => {
+                if (!isActionEmail(e)) return false;
+                if (e.followUpAt) {
+                    return isSameDay(e.followUpAt, today);
+                }
+                return isSameDay(e.date, today);
+            });
+
+            const agendaEvents = events.filter(ev => {
+                const when = ev.rescheduledStart || ev.start;
+                return isSameDay(when, today);
+            });
+
+            const agendaTasks = tasks.filter(t => {
+                if (t.done) return false;
+                if (t.dueAt) {
+                    return isSameDay(t.dueAt, today);
+                }
+                return true;
+            });
+
+            const openReschedule = (type, id) => {
+                let currentDate = new Date();
+                if (type === 'task') {
+                    const task = tasks.find(t => t.id === id);
+                    if (task && task.dueAt) {
+                        currentDate = new Date(task.dueAt);
+                    }
+                } else if (type === 'email') {
+                    const email = emails.find(e => e.id === id);
+                    if (email && email.followUpAt) {
+                        currentDate = new Date(email.followUpAt);
+                    }
+                } else if (type === 'event') {
+                    const ev = events.find(e => e.id === id);
+                    if (ev && (ev.rescheduledStart || ev.start)) {
+                        currentDate = new Date(ev.rescheduledStart || ev.start);
+                    }
+                }
+                const dateStr = currentDate.toISOString().split('T')[0];
+                const timeStr = currentDate.toTimeString().slice(0, 5);
+                setRescheduleDate(dateStr);
+                setRescheduleTime(timeStr);
+                setRescheduleTarget({ type, id });
+            };
+
+            const applyReschedule = () => {
+                if (!rescheduleTarget || !rescheduleDate) {
+                    setRescheduleTarget(null);
+                    return;
+                }
+                const timePart = rescheduleTime || '09:00';
+                const iso = new Date(`${rescheduleDate}T${timePart}:00`).toISOString();
+                if (rescheduleTarget.type === 'task') {
+                    setTasks(prev => prev.map(t => 
+                        t.id === rescheduleTarget.id ? { ...t, dueAt: iso } : t
+                    ));
+                } else if (rescheduleTarget.type === 'email') {
+                    setEmails(prev => prev.map(e => 
+                        e.id === rescheduleTarget.id ? { ...e, followUpAt: iso } : e
+                    ));
+                } else if (rescheduleTarget.type === 'event') {
+                    setEvents(prev => prev.map(ev => 
+                        ev.id === rescheduleTarget.id ? { ...ev, rescheduledStart: iso } : ev
+                    ));
+                }
+                setRescheduleTarget(null);
+            };
 
             return (
                 <div className={darkMode ? 'bg-gray-900 text-white min-h-screen' : 'bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen'}>
+                    {/* Import modal */}
                     {showImport && (
                         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
                             <div className={`rounded-3xl p-6 max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
@@ -263,19 +498,76 @@
                         </div>
                     )}
 
-                    {showCopySuccess && (
-                        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50">
-                            ✅ Copied to clipboard!
+                    {/* Reschedule modal */}
+                    {rescheduleTarget && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                            <div className={`rounded-3xl p-6 max-w-sm w-full ${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
+                                <h2 className="text-lg font-bold mb-4">Reschedule</h2>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm mb-1">New date</label>
+                                        <input
+                                            type="date"
+                                            value={rescheduleDate}
+                                            onChange={(e) => setRescheduleDate(e.target.value)}
+                                            className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm mb-1">New time</label>
+                                        <input
+                                            type="time"
+                                            value={rescheduleTime}
+                                            onChange={(e) => setRescheduleTime(e.target.value)}
+                                            className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
+                                        />
+                                    </div>
+                                    <div className="flex justify-end gap-3 pt-2">
+                                        <button
+                                            onClick={() => setRescheduleTarget(null)}
+                                            className={darkMode ? 'px-4 py-2 rounded-lg bg-gray-700' : 'px-4 py-2 rounded-lg bg-gray-200'}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={applyReschedule}
+                                            className="px-4 py-2 rounded-lg bg-blue-500 text-white font-semibold"
+                                        >
+                                            Save
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
 
+                    {/* Copy success */}
+                    {showCopySuccess && (
+                        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50">
+                            Copied to clipboard.
+                        </div>
+                    )}
+
+                    {/* Undo snackbar */}
+                    {showUndo && (
+                        <div className={`fixed bottom-20 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-full shadow-lg z-50 flex items-center gap-3 ${darkMode ? 'bg-gray-800 text-white' : 'bg-gray-900 text-white'}`}>
+                            <span>Email action completed.</span>
+                            <button onClick={handleUndo} className="font-semibold underline">
+                                Undo
+                            </button>
+                        </div>
+                    )}
+
+                    {/* TODAY / DAILY BRIEFING SCREEN */}
                     {screen === 'today' && (
                         <div className="pb-24">
                             <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80 border-gray-800' : 'bg-white/80 border-gray-200'}`}>
                                 <div className="flex justify-between items-center">
                                     <div>
-                                        <h1 className="text-3xl font-bold">Good Morning</h1>
-                                        <p className="text-sm text-gray-500 mt-1">Saturday, November 16, 2025</p>
+                                        <h1 className="text-2xl font-bold">Daily Briefing</h1>
+                                        <p className="text-sm text-gray-500 mt-1">
+                                            {today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                                        </p>
                                     </div>
                                     <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-gray-200">
                                         {darkMode ? '☀️' : '🌙'}
@@ -284,37 +576,163 @@
                             </div>
 
                             <div className="p-6 space-y-6">
-                                <div className={`rounded-2xl p-6 border ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
-                                    <h2 className="text-xl font-bold mb-4">🎯 Priority Today</h2>
-                                    {tasks.filter(t => !t.done).slice(0, 3).map(task => (
-                                        <div key={task.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 mb-2">
-                                            <input type="checkbox" checked={task.done} onChange={() => {
-                                                setTasks(tasks.map(t => t.id === task.id ? {...t, done: !t.done} : t));
-                                            }} className="w-5 h-5" />
-                                            <span>{task.text}</span>
+                                {/* Smart summary */}
+                                <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                    <h2 className="text-lg font-semibold mb-3">Summary</h2>
+                                    <div className="grid grid-cols-3 gap-3 text-sm">
+                                        <div>
+                                            <p className="text-gray-500">Action emails</p>
+                                            <p className="text-xl font-bold">{agendaEmails.length}</p>
                                         </div>
-                                    ))}
+                                        <div>
+                                            <p className="text-gray-500">Events today</p>
+                                            <p className="text-xl font-bold">{agendaEvents.length}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-500">Tasks today</p>
+                                            <p className="text-xl font-bold">{agendaTasks.length}</p>
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <button onClick={() => setScreen('inbox')} className="bg-blue-500 text-white p-4 rounded-xl font-medium">
-                                        📧 Inbox ({emails.length})
-                                    </button>
-                                    <button onClick={() => setScreen('calendar')} className="bg-purple-500 text-white p-4 rounded-xl font-medium">
-                                        📅 Calendar ({events.length})
-                                    </button>
+                                {/* Today tasks */}
+                                <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                    <div className="flex justify-between items-center mb-3">
+                                        <h2 className="text-lg font-semibold">Today’s tasks</h2>
+                                    </div>
+                                    {agendaTasks.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {agendaTasks.slice(0, 5).map(task => (
+                                                <div key={task.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50">
+                                                    <div className="flex items-center gap-3">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={task.done} 
+                                                            onChange={() => {
+                                                                setTasks(prev => prev.map(t => t.id === task.id ? { ...t, done: !t.done } : t));
+                                                            }} 
+                                                            className="w-5 h-5" 
+                                                        />
+                                                        <span className={task.done ? 'line-through text-gray-400' : ''}>{task.text}</span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => openReschedule('task', task.id)}
+                                                        className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                    >
+                                                        Reschedule
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-500">No tasks scheduled for today.</p>
+                                    )}
+                                </div>
+
+                                {/* Action emails */}
+                                <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                    <h2 className="text-lg font-semibold mb-3">Emails that need your reply</h2>
+                                    {agendaEmails.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {agendaEmails.slice(0, 6).map(email => (
+                                                <div key={email.id} className="rounded-xl border p-3 bg-gray-50">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <div className="flex-1">
+                                                            <p className="text-sm font-semibold">{email.sender}</p>
+                                                            <p className="text-xs text-gray-500">{email.senderEmail}</p>
+                                                        </div>
+                                                        <span className={`text-xs px-2 py-0.5 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                            {email.priority}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-sm font-medium mt-1 cursor-pointer" onClick={() => { 
+                                                        setSelectedEmail(email.id); 
+                                                        setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                        setScreen('draft'); 
+                                                    }}>
+                                                        {email.subject}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mt-1 cursor-pointer" onClick={() => { 
+                                                        setSelectedEmail(email.id); 
+                                                        setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                        setScreen('draft'); 
+                                                    }}>
+                                                        {email.preview.substring(0, 90)}...
+                                                    </p>
+                                                    <div className="flex gap-2 mt-2">
+                                                        <button
+                                                            onClick={() => { 
+                                                                setSelectedEmail(email.id); 
+                                                                setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                                setScreen('draft'); 
+                                                            }}
+                                                            className="text-xs px-2 py-1 rounded-lg bg-blue-500 text-white"
+                                                        >
+                                                            Open
+                                                        </button>
+                                                        <button
+                                                            onClick={() => openReschedule('email', email.id)}
+                                                            className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                        >
+                                                            Reschedule
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-500">No action emails for today.</p>
+                                    )}
+                                </div>
+
+                                {/* Today events */}
+                                <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                    <h2 className="text-lg font-semibold mb-3">Today’s events</h2>
+                                    {agendaEvents.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {agendaEvents.map(ev => {
+                                                const when = ev.rescheduledStart || ev.start;
+                                                return (
+                                                    <div key={ev.id} className="rounded-xl border p-3 bg-gray-50">
+                                                        <p className="text-sm font-semibold">{ev.title}</p>
+                                                        <p className="text-xs text-gray-500 mt-1">Time: {formatTime(when)}</p>
+                                                        {ev.location && (
+                                                            <p className="text-xs text-gray-500 mt-1">Location: {ev.location}</p>
+                                                        )}
+                                                        <div className="flex gap-2 mt-2">
+                                                            <button
+                                                                onClick={() => openReschedule('event', ev.id)}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                            >
+                                                                Reschedule
+                                                            </button>
+                                                            <button
+                                                                onClick={() => deleteEvent(ev.id)}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-700"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-500">No events scheduled for today.</p>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     )}
 
+                    {/* INBOX SCREEN */}
                     {screen === 'inbox' && (
                         <div className="pb-24">
                             <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
                                 <div className="flex justify-between items-center mb-4">
-                                    <h1 className="text-2xl font-bold">📧 Inbox</h1>
+                                    <h1 className="text-2xl font-bold">Inbox</h1>
                                     <button onClick={() => setShowImport(true)} className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                                        📤 Upload
+                                        Upload
                                     </button>
                                 </div>
                                 
@@ -335,34 +753,85 @@
 
                             <div className="p-4 space-y-3">
                                 {filteredEmails.map(email => (
-                                    <div key={email.id} onClick={() => { 
-                                        setSelectedEmail(email.id); 
-                                        setDraftReply(email.aiDraft || 'Click "Generate AI Reply" to create a personalized response...');
-                                        setScreen('draft'); 
-                                    }}
-                                        className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
+                                    <div
+                                        key={email.id}
+                                        className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}
+                                        onTouchStart={(e) => {
+                                            if (e.touches && e.touches.length > 0) {
+                                                touchStartXRef.current = e.touches[0].clientX;
+                                            }
+                                        }}
+                                        onTouchEnd={(e) => {
+                                            if (e.changedTouches && e.changedTouches.length > 0 && touchStartXRef.current !== null) {
+                                                const endX = e.changedTouches[0].clientX;
+                                                const diff = touchStartXRef.current - endX;
+                                                if (diff > 50) {
+                                                    deleteEmail(email.id);
+                                                }
+                                            }
+                                            touchStartXRef.current = null;
+                                        }}
+                                    >
                                         <div className="flex items-start justify-between mb-2">
-                                            <h3 className="font-semibold text-sm flex-1">{email.sender}</h3>
+                                            <h3 
+                                                className="font-semibold text-sm flex-1 cursor-pointer"
+                                                onClick={() => { 
+                                                    setSelectedEmail(email.id); 
+                                                    setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                    setScreen('draft'); 
+                                                }}
+                                            >
+                                                {email.sender}
+                                            </h3>
                                             <div className="flex items-center gap-2">
                                                 <span className={`text-xs px-2 py-0.5 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
                                                     {email.priority}
                                                 </span>
                                                 <span className="text-xs text-gray-500">{formatDate(email.date)}</span>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        deleteEmail(email.id);
+                                                    }}
+                                                    className="text-red-500 hover:bg-red-100 p-1 rounded-lg"
+                                                    title="Delete email"
+                                                >
+                                                    🗑️
+                                                </button>
                                             </div>
                                         </div>
-                                        <p className="font-medium text-sm mb-1">{email.subject}</p>
-                                        <p className="text-xs text-gray-500 mt-1">{email.preview.substring(0, 80)}...</p>
+                                        <p 
+                                            className="font-medium text-sm mb-1 cursor-pointer"
+                                            onClick={() => { 
+                                                setSelectedEmail(email.id); 
+                                                setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                setScreen('draft'); 
+                                            }}
+                                        >
+                                            {email.subject}
+                                        </p>
+                                        <p 
+                                            className="text-xs text-gray-500 mt-1 cursor-pointer"
+                                            onClick={() => { 
+                                                setSelectedEmail(email.id); 
+                                                setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                setScreen('draft'); 
+                                            }}
+                                        >
+                                            {email.preview.substring(0, 80)}...
+                                        </p>
                                     </div>
                                 ))}
                                 {filteredEmails.length === 0 && (
                                     <div className="text-center py-12 text-gray-500">
-                                        {searchQuery ? '🔍 No emails found' : '📭 No emails yet'}
+                                        {searchQuery ? 'No emails found' : 'No emails yet'}
                                     </div>
                                 )}
                             </div>
                         </div>
                     )}
 
+                    {/* DRAFT SCREEN */}
                     {screen === 'draft' && selectedEmail && (
                         <div className="pb-24">
                             <div className={`sticky top-0 backdrop-blur-xl border-b p-4 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
@@ -373,6 +842,8 @@
                             <div className="p-4 space-y-4">
                                 {(() => {
                                     const email = emails.find(e => e.id === selectedEmail);
+                                    if (!email) return null;
+
                                     return (
                                         <>
                                             {/* Email Preview Card */}
@@ -406,7 +877,7 @@
 
                                             {/* AI Reply Card */}
                                             <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                                                <h2 className="text-xl font-bold mb-4">🤖 AI-Powered Reply</h2>
+                                                <h2 className="text-xl font-bold mb-4">AI powered reply</h2>
                                                 
                                                 <button 
                                                     onClick={generateAIReply}
@@ -416,20 +887,20 @@
                                                             ? 'bg-gray-400 cursor-not-allowed' 
                                                             : 'bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white'
                                                     }`}>
-                                                    {isGenerating ? '⏳ Generating Smart Reply...' : '✨ Generate Smart Reply'}
+                                                    {isGenerating ? 'Generating smart reply' : 'Generate smart reply'}
                                                 </button>
                                                 
                                                 <textarea 
                                                     value={draftReply}
                                                     onChange={(e) => setDraftReply(e.target.value)}
-                                                    placeholder="Click 'Generate Smart Reply' to create a personalized response..."
+                                                    placeholder="Click 'Generate smart reply' to create a personalized response..."
                                                     className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
                                                 />
                                                 <div className="flex gap-3 mt-4">
                                                     <button 
                                                         onClick={copyDraftToClipboard}
                                                         className="flex-1 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold">
-                                                        📋 Copy Email & Reply
+                                                        Copy email and reply
                                                     </button>
                                                     <button 
                                                         onClick={() => setScreen('inbox')}
@@ -445,36 +916,60 @@
                         </div>
                     )}
 
+                    {/* TASKS SCREEN */}
                     {screen === 'tasks' && (
                         <div className="pb-24">
                             <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
-                                <h1 className="text-2xl font-bold">✅ Tasks</h1>
+                                <h1 className="text-2xl font-bold">Tasks</h1>
                             </div>
                             <div className="p-4 space-y-3">
                                 {tasks.map(task => (
                                     <div key={task.id} className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                                        <div className="flex items-center gap-3">
-                                            <input type="checkbox" checked={task.done} onChange={() => {
-                                                setTasks(tasks.map(t => t.id === task.id ? {...t, done: !t.done} : t));
-                                            }} className="w-6 h-6" />
-                                            <span className={task.done ? 'line-through' : ''}>{task.text}</span>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-3">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={task.done} 
+                                                    onChange={() => {
+                                                        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, done: !t.done } : t));
+                                                    }} 
+                                                    className="w-6 h-6" 
+                                                />
+                                                <span className={task.done ? 'line-through text-gray-400' : ''}>{task.text}</span>
+                                            </div>
+                                            <button
+                                                onClick={() => openReschedule('task', task.id)}
+                                                className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                            >
+                                                Reschedule
+                                            </button>
                                         </div>
+                                        {task.dueAt && (
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Scheduled for {formatDate(task.dueAt)} at {formatTime(task.dueAt)}
+                                            </p>
+                                        )}
                                     </div>
                                 ))}
+                                {tasks.length === 0 && (
+                                    <p className="text-center text-gray-500 text-sm">No tasks added yet.</p>
+                                )}
                             </div>
                         </div>
                     )}
 
+                    {/* CALENDAR SCREEN */}
                     {screen === 'calendar' && (
                         <div className="pb-24">
                             <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
-                                <h1 className="text-2xl font-bold">📅 Calendar - Next 30 Days</h1>
+                                <h1 className="text-2xl font-bold">Calendar</h1>
                                 <p className="text-sm text-gray-500 mt-1">{events.length} events</p>
                             </div>
                             <div className="p-4 space-y-3">
                                 {events.length > 0 ? events.map((event, idx) => {
-                                    const eventDate = new Date(event.start);
-                                    const showDate = idx === 0 || new Date(events[idx-1].start).toDateString() !== eventDate.toDateString();
+                                    const when = event.rescheduledStart || event.start;
+                                    const eventDate = new Date(when);
+                                    const showDate = idx === 0 || new Date(events[idx-1].rescheduledStart || events[idx-1].start).toDateString() !== eventDate.toDateString();
                                     
                                     return (
                                         <div key={event.id}>
@@ -487,34 +982,97 @@
                                                 <div className="flex justify-between items-start">
                                                     <div className="flex-1">
                                                         <h3 className="text-lg font-bold">{event.title}</h3>
-                                                        <p className="text-sm text-gray-500 mt-2">🕐 {formatTime(event.start)}</p>
-                                                        {event.location && <p className="text-sm text-gray-500 mt-1">📍 {event.location}</p>}
+                                                        <p className="text-sm text-gray-500 mt-2">Time {formatTime(when)}</p>
+                                                        {event.location && <p className="text-sm text-gray-500 mt-1">Location {event.location}</p>}
                                                     </div>
-                                                    <button 
-                                                        onClick={() => deleteEvent(event.id)}
-                                                        className="text-red-500 hover:bg-red-50 p-2 rounded-lg ml-2">
-                                                        🗑️
-                                                    </button>
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        <button 
+                                                            onClick={() => openReschedule('event', event.id)}
+                                                            className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                        >
+                                                            Reschedule
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => deleteEvent(event.id)}
+                                                            className="text-red-500 hover:bg-red-50 p-2 rounded-lg ml-2">
+                                                            🗑️
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
                                     );
                                 }) : (
                                     <div className="text-center py-12 text-gray-500">
-                                        <p>📅 No events</p>
+                                        <p>No events.</p>
                                     </div>
                                 )}
                             </div>
                         </div>
                     )}
 
+                    {/* TRASH SCREEN */}
+                    {screen === 'trash' && (
+                        <div className="pb-24">
+                            <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
+                                <h1 className="text-2xl font-bold">Trash</h1>
+                                <p className="text-sm text-gray-500 mt-1">{trash.length} deleted emails</p>
+                            </div>
+                            <div className="p-4 space-y-3">
+                                {trash.map(email => (
+                                    <div
+                                        key={email.id}
+                                        className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}
+                                    >
+                                        <div className="flex items-start justify-between mb-2">
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-sm">{email.sender}</p>
+                                                <p className="text-xs text-gray-500">{email.senderEmail}</p>
+                                                <p className="font-medium text-sm mt-2">{email.subject}</p>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    {email.preview.substring(0, 80)}...
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-2">
+                                                <span className={`text-xs px-2 py-0.5 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                    {email.priority}
+                                                </span>
+                                                <span className="text-xs text-gray-500">{formatDate(email.date)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-3 mt-3">
+                                            <button
+                                                onClick={() => restoreFromTrash(email.id)}
+                                                className="flex-1 bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-semibold"
+                                            >
+                                                Restore
+                                            </button>
+                                            <button
+                                                onClick={() => hardDeleteFromTrash(email.id)}
+                                                className="flex-1 bg-red-500 text-white px-4 py-2 rounded-xl text-sm font-semibold"
+                                            >
+                                                Delete permanently
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {trash.length === 0 && (
+                                    <div className="text-center py-12 text-gray-500">
+                                        No emails in Trash.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Bottom navigation */}
                     <div className={`fixed bottom-0 left-0 right-0 border-t backdrop-blur-xl ${darkMode ? 'bg-gray-900/95 border-gray-800' : 'bg-white/95 border-gray-200'}`}>
                         <div className="flex justify-around p-4">
                             <button onClick={() => setScreen('today')} className={`flex flex-col items-center ${screen === 'today' ? 'text-blue-500' : 'text-gray-400'}`}>
-                                <span className="text-2xl">🎯</span>
-                                <span className="text-xs mt-1">Today</span>
+                                <span className="text-2xl">📓</span>
+                                <span className="text-xs mt-1">Briefing</span>
                             </button>
-                            <button onClick={() => setScreen('inbox')} className={`flex flex-col items-center ${screen === 'inbox' ? 'text-blue-500' : 'text-gray-400'}`}>
+                            <button onClick={() => setScreen('inbox')} className={`flex flex-col items-center ${(screen === 'inbox' || screen === 'draft') ? 'text-blue-500' : 'text-gray-400'}`}>
                                 <span className="text-2xl">📧</span>
                                 <span className="text-xs mt-1">Inbox</span>
                             </button>
@@ -525,6 +1083,10 @@
                             <button onClick={() => setScreen('calendar')} className={`flex flex-col items-center ${screen === 'calendar' ? 'text-blue-500' : 'text-gray-400'}`}>
                                 <span className="text-2xl">📅</span>
                                 <span className="text-xs mt-1">Calendar</span>
+                            </button>
+                            <button onClick={() => setScreen('trash')} className={`flex flex-col items-center ${screen === 'trash' ? 'text-blue-500' : 'text-gray-400'}`}>
+                                <span className="text-2xl">🗑️</span>
+                                <span className="text-xs mt-1">Trash</span>
                             </button>
                         </div>
                     </div>
