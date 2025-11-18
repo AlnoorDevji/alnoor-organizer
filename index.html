@@ -18,9 +18,10 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // If you set this to your Dropbox JSON link, the app will try to auto-import on load.
-        // Example: const REMOTE_JSON_URL = "https://www.dropbox.com/s/xxxxxx/today.json?dl=1";
+        // Optional remote JSON sync (Dropbox etc). Leave null for now.
         const REMOTE_JSON_URL = null;
+
+        const PIN_CODE = "4500";
 
         function isSameDay(dateStr, refDate = new Date()) {
             if (!dateStr) return false;
@@ -28,6 +29,196 @@
             return d.getFullYear() === refDate.getFullYear() &&
                    d.getMonth() === refDate.getMonth() &&
                    d.getDate() === refDate.getDate();
+        }
+
+        function daysBetween(from, to) {
+            const ms = to.getTime() - from.getTime();
+            return ms / (1000 * 60 * 60 * 24);
+        }
+
+        function parseNaturalSchedule(input, base = new Date()) {
+            if (!input || !input.trim()) return null;
+            const text = input.trim().toLowerCase();
+            const now = base;
+
+            // Defaults
+            let target = new Date(now.getTime());
+
+            const weekdayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+
+            function setTimeFromToken(t) {
+                // Handles things like "2pm", "14:00", "7", "7am", "7 pm"
+                const ampmMatch = t.match(/^(\d{1,2})(:(\d{2}))?\s*(am|pm)?$/);
+                if (ampmMatch) {
+                    let hour = parseInt(ampmMatch[1], 10);
+                    const minute = ampmMatch[3] ? parseInt(ampmMatch[3], 10) : 0;
+                    const suffix = ampmMatch[4];
+                    if (suffix === "pm" && hour < 12) hour += 12;
+                    if (suffix === "am" && hour === 12) hour = 0;
+                    target.setHours(hour, minute, 0, 0);
+                    return;
+                }
+                // Named windows
+                if (t === "morning") {
+                    target.setHours(9, 0, 0, 0);
+                    return;
+                }
+                if (t === "afternoon") {
+                    target.setHours(14, 0, 0, 0);
+                    return;
+                }
+                if (t === "evening") {
+                    target.setHours(19, 0, 0, 0);
+                    return;
+                }
+                if (t === "after school") {
+                    target.setHours(16, 0, 0, 0);
+                    return;
+                }
+                if (t === "before dinner") {
+                    target.setHours(17, 0, 0, 0);
+                    return;
+                }
+            }
+
+            // Simple relative: "in 2 days", "in 3 hours"
+            const inMatch = text.match(/^in\s+(\d+)\s+(day|days|hour|hours)$/);
+            if (inMatch) {
+                const value = parseInt(inMatch[1], 10);
+                const unit = inMatch[2];
+                if (unit.startsWith("day")) {
+                    target.setDate(target.getDate() + value);
+                    target.setHours(9, 0, 0, 0);
+                } else {
+                    target.setHours(target.getHours() + value);
+                }
+                return target;
+            }
+
+            // "today" variants
+            if (text.startsWith("today")) {
+                target.setHours(9, 0, 0, 0);
+                const tokens = text.split(/\s+/);
+                if (tokens.length > 1) {
+                    setTimeFromToken(tokens.slice(1).join(" "));
+                }
+                return target;
+            }
+
+            // "tomorrow" variants
+            if (text.startsWith("tomorrow")) {
+                target.setDate(target.getDate() + 1);
+                target.setHours(9, 0, 0, 0);
+                const tokens = text.split(/\s+/);
+                if (tokens.length > 1) {
+                    setTimeFromToken(tokens.slice(1).join(" "));
+                }
+                return target;
+            }
+
+            // "next friday", "next monday 3pm"
+            if (text.startsWith("next ")) {
+                const tokens = text.split(/\s+/);
+                if (tokens.length >= 2) {
+                    const weekdayStr = tokens[1];
+                    const index = weekdayNames.indexOf(weekdayStr);
+                    if (index !== -1) {
+                        const currentDay = target.getDay();
+                        let diff = (index + 7 - currentDay) % 7;
+                        if (diff === 0) diff = 7; // always next week
+                        target.setDate(target.getDate() + diff);
+                        target.setHours(9, 0, 0, 0);
+                        if (tokens.length > 2) {
+                            setTimeFromToken(tokens.slice(2).join(" "));
+                        }
+                        return target;
+                    }
+                }
+            }
+
+            // "monday 2pm"
+            for (let i = 0; i < weekdayNames.length; i++) {
+                if (text.startsWith(weekdayNames[i])) {
+                    const tokens = text.split(/\s+/);
+                    const currentDay = target.getDay();
+                    let diff = (i + 7 - currentDay) % 7;
+                    if (diff === 0) diff = 7;
+                    target.setDate(target.getDate() + diff);
+                    target.setHours(9, 0, 0, 0);
+                    if (tokens.length > 1) {
+                        setTimeFromToken(tokens.slice(1).join(" "));
+                    }
+                    return target;
+                }
+            }
+
+            // Only a time like "2pm" or "14:00" today
+            setTimeFromToken(text);
+            return target;
+        }
+
+        function getEmailPriorityScore(email, today = new Date()) {
+            // Weighted model:
+            // base on priority + tags + recency + explicit follow-up
+            let score = 0;
+            const subject = (email.subject || "").toLowerCase();
+            const preview = (email.preview || "").toLowerCase();
+            const tags = (email.tags || []).map(t => t.toLowerCase());
+            const date = email.followUpAt || email.date;
+            const d = date ? new Date(date) : today;
+            const daysDiff = Math.abs(daysBetween(today, d));
+
+            // Base on priority
+            if (email.priority === "High") score += 40;
+            else score += 20;
+
+            // Tags
+            if (tags.includes("action required")) score += 40;
+            if (tags.includes("parent contact") || tags.includes("parent communication")) score += 25;
+            if (tags.includes("assessment")) score += 20;
+            if (tags.includes("student work")) score += 15;
+
+            // Content hints
+            if (subject.includes("urgent") || subject.includes("asap")) score += 30;
+            if (subject.includes("progress") || preview.includes("progress")) score += 20;
+            if (preview.includes("let me know") || preview.includes("can you")) score += 10;
+
+            // Recency: closer to today → higher
+            if (daysDiff < 1) score += 20;
+            else if (daysDiff < 3) score += 10;
+            else if (daysDiff < 7) score += 5;
+
+            // Explicit follow up date gets a boost
+            if (email.followUpAt && isSameDay(email.followUpAt, today)) score += 30;
+
+            return score;
+        }
+
+        function getTaskPriorityScore(task, today = new Date()) {
+            let score = 0;
+
+            if (task.done) return 0;
+
+            // Base urgency
+            if (task.dueAt) {
+                const d = new Date(task.dueAt);
+                const diff = daysBetween(today, d);
+                if (diff < 0) score += 40;           // overdue
+                else if (diff < 0.5) score += 35;    // today
+                else if (diff < 2) score += 25;      // next couple of days
+                else if (diff < 7) score += 10;      // later this week
+            } else {
+                score += 10; // no due date but still relevant
+            }
+
+            const text = (task.text || "").toLowerCase();
+            // Parent/retention tasks get a bump
+            if (text.includes("parent") || text.includes("call") || text.includes("email")) score += 20;
+            if (text.includes("assessment") || text.includes("enrol") || text.includes("enrollment")) score += 20;
+            if (text.includes("staff") || text.includes("training")) score += 10;
+            if (text.includes("automation") || text.includes("system")) score += 10;
+
+            return score;
         }
 
         function App() {
@@ -44,45 +235,61 @@
             const [showCopySuccess, setShowCopySuccess] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
 
-            // Undo state
+            const [locked, setLocked] = useState(true);
+            const [pinInput, setPinInput] = useState("");
+
+            // Undo
             const [showUndo, setShowUndo] = useState(false);
-            const [undoInfo, setUndoInfo] = useState(null); // { type: 'fromInbox' | 'hardDelete', email }
+            const [undoInfo, setUndoInfo] = useState(null);
             const undoTimeoutRef = useRef(null);
 
-            // Swipe tracking
+            // Swipe
             const touchStartXRef = useRef(null);
 
-            // Reschedule modal state
-            const [rescheduleTarget, setRescheduleTarget] = useState(null); // {type: 'task'|'email'|'event', id}
+            // Reschedule modal
+            const [rescheduleTarget, setRescheduleTarget] = useState(null);
             const [rescheduleDate, setRescheduleDate] = useState('');
             const [rescheduleTime, setRescheduleTime] = useState('');
+            const [rescheduleNatural, setRescheduleNatural] = useState('');
+
+            // Weekly notes
+            const [weeklyNotes, setWeeklyNotes] = useState("");
+            const [weeklyKey, setWeeklyKey] = useState("");
 
             useEffect(() => {
                 const savedEmails = localStorage.getItem('dayorganizer-emails');
                 const savedTasks = localStorage.getItem('dayorganizer-tasks');
                 const savedEvents = localStorage.getItem('dayorganizer-events');
                 const savedTrash = localStorage.getItem('dayorganizer-trash-emails');
-                
+
                 if (savedEmails) setEmails(JSON.parse(savedEmails));
                 if (savedTasks) setTasks(JSON.parse(savedTasks));
                 if (savedEvents) setEvents(JSON.parse(savedEvents));
                 if (savedTrash) setTrash(JSON.parse(savedTrash));
+
+                // Load weekly notes for current week
+                const today = new Date();
+                const y = today.getFullYear();
+                const week = Math.ceil(((today - new Date(y, 0, 1)) / 86400000 + new Date(y, 0, 1).getDay() + 1) / 7);
+                const key = `dayorganizer-weekly-${y}-w${week}`;
+                setWeeklyKey(key);
+                const storedNotes = localStorage.getItem(key);
+                if (storedNotes) setWeeklyNotes(storedNotes);
             }, []);
 
-            // Optional remote JSON auto import
+            // Remote JSON auto-import (optional)
             useEffect(() => {
                 const fetchRemote = async () => {
                     if (!REMOTE_JSON_URL) return;
                     try {
                         const res = await fetch(REMOTE_JSON_URL, { cache: 'no-store' });
-                        if (!res.ok) {
-                            console.warn('Remote JSON fetch failed with status', res.status);
-                            return;
-                        }
+                        if (!res.ok) return;
                         const data = await res.json();
                         const emailData = Array.isArray(data) ? data : (data.emails || []);
                         const eventData = data.events || [];
-                        const processed = emailData.map((item, i) => ({
+                        const taskData = data.tasks || [];
+
+                        const processedEmails = emailData.map((item, i) => ({
                             id: Date.now() + i,
                             sender: (item.sender || '').replace(/<.*>/, '').trim(),
                             senderEmail: (item.sender || '').match(/<(.+?)>/)?.[1] || item.sender || '',
@@ -94,8 +301,16 @@
                             aiDraft: item.aiDraft || '',
                             followUpAt: item.followUpAt || null
                         }));
-                        setEmails(processed);
+                        const processedTasks = taskData.map((t, i) => ({
+                            id: t.id || `task-${Date.now()}-${i}`,
+                            text: t.text || '',
+                            done: !!t.done,
+                            dueAt: t.dueAt || null
+                        }));
+
+                        setEmails(processedEmails);
                         setEvents(eventData);
+                        setTasks(processedTasks);
                     } catch (e) {
                         console.warn('Remote JSON fetch error', e);
                     }
@@ -134,6 +349,12 @@
                     localStorage.removeItem('dayorganizer-trash-emails');
                 }
             }, [trash]);
+
+            useEffect(() => {
+                if (weeklyKey) {
+                    localStorage.setItem(weeklyKey, weeklyNotes);
+                }
+            }, [weeklyNotes, weeklyKey]);
 
             const triggerUndo = (info) => {
                 setUndoInfo(info);
@@ -255,8 +476,9 @@
                         const data = JSON.parse(event.target.result);
                         const emailData = Array.isArray(data) ? data : (data.emails || []);
                         const eventData = data.events || [];
-                        
-                        const processed = emailData.map((item, i) => ({
+                        const taskData = data.tasks || [];
+
+                        const processedEmails = emailData.map((item, i) => ({
                             id: Date.now() + i,
                             sender: (item.sender || '').replace(/<.*>/, '').trim(),
                             senderEmail: (item.sender || '').match(/<(.+?)>/)?.[1] || item.sender || '',
@@ -268,11 +490,18 @@
                             aiDraft: item.aiDraft || '',
                             followUpAt: item.followUpAt || null
                         }));
+                        const processedTasks = taskData.map((t, i) => ({
+                            id: t.id || `task-${Date.now()}-${i}`,
+                            text: t.text || '',
+                            done: !!t.done,
+                            dueAt: t.dueAt || null
+                        }));
                         
-                        setEmails(processed);
+                        setEmails(processedEmails);
                         setEvents(eventData);
+                        setTasks(processedTasks);
                         setShowImport(false);
-                        alert('Imported ' + processed.length + ' emails and ' + eventData.length + ' events.');
+                        alert('Imported ' + processedEmails.length + ' emails, ' + eventData.length + ' events and ' + processedTasks.length + ' tasks.');
                     } catch (err) {
                         alert('Error: ' + err.message);
                     }
@@ -413,26 +642,66 @@
 
             const today = new Date();
 
-            const agendaEmails = emails.filter(e => {
+            let agendaEmails = emails.filter(e => {
                 if (!isActionEmail(e)) return false;
                 if (e.followUpAt) {
                     return isSameDay(e.followUpAt, today);
                 }
                 return isSameDay(e.date, today);
             });
+            agendaEmails = agendaEmails
+                .map(e => ({ ...e, _score: getEmailPriorityScore(e, today) }))
+                .sort((a, b) => b._score - a._score);
 
-            const agendaEvents = events.filter(ev => {
-                const when = ev.rescheduledStart || ev.start;
-                return isSameDay(when, today);
-            });
-
-            const agendaTasks = tasks.filter(t => {
+            let agendaTasks = tasks.filter(t => {
                 if (t.done) return false;
                 if (t.dueAt) {
                     return isSameDay(t.dueAt, today);
                 }
                 return true;
             });
+            agendaTasks = agendaTasks
+                .map(t => ({ ...t, _score: getTaskPriorityScore(t, today) }))
+                .sort((a, b) => b._score - a._score);
+
+            const agendaEvents = events.filter(ev => {
+                const when = ev.rescheduledStart || ev.start;
+                return isSameDay(when, today);
+            });
+
+            // Upcoming (next 7 days) and rescheduled view
+            const sevenDaysAhead = new Date(today.getTime());
+            sevenDaysAhead.setDate(today.getDate() + 7);
+
+            const isWithinNext7Days = (dateStr) => {
+                if (!dateStr) return false;
+                const d = new Date(dateStr);
+                return d >= today && d <= sevenDaysAhead;
+            };
+
+            const upcomingTasks = tasks.filter(t => {
+                if (t.done) return false;
+                if (!t.dueAt) return false;
+                return isWithinNext7Days(t.dueAt);
+            }).sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt));
+
+            const upcomingEmails = emails.filter(e => {
+                const when = e.followUpAt || e.date;
+                if (!isActionEmail(e)) return false;
+                return isWithinNext7Days(when);
+            }).map(e => ({ ...e, _score: getEmailPriorityScore(e, today) }))
+              .sort((a, b) => b._score - a._score);
+
+            const upcomingEvents = events.filter(ev => {
+                const when = ev.rescheduledStart || ev.start;
+                return isWithinNext7Days(when);
+            }).sort((a, b) => new Date(a.rescheduledStart || a.start) - new Date(b.rescheduledStart || b.start));
+
+            const rescheduledOnly = {
+                tasks: tasks.filter(t => t.dueAt && !isSameDay(t.dueAt, today)),
+                emails: emails.filter(e => e.followUpAt && !isSameDay(e.followUpAt, today)),
+                events: events.filter(ev => ev.rescheduledStart && !isSameDay(ev.rescheduledStart, today))
+            };
 
             const openReschedule = (type, id) => {
                 let currentDate = new Date();
@@ -456,16 +725,34 @@
                 const timeStr = currentDate.toTimeString().slice(0, 5);
                 setRescheduleDate(dateStr);
                 setRescheduleTime(timeStr);
+                setRescheduleNatural('');
                 setRescheduleTarget({ type, id });
             };
 
             const applyReschedule = () => {
-                if (!rescheduleTarget || !rescheduleDate) {
+                if (!rescheduleTarget) {
                     setRescheduleTarget(null);
                     return;
                 }
-                const timePart = rescheduleTime || '09:00';
-                const iso = new Date(`${rescheduleDate}T${timePart}:00`).toISOString();
+
+                let iso = null;
+
+                if (rescheduleNatural && rescheduleNatural.trim()) {
+                    const parsed = parseNaturalSchedule(rescheduleNatural, new Date());
+                    if (parsed && !isNaN(parsed.getTime())) {
+                        iso = parsed.toISOString();
+                    } else {
+                        alert("I could not understand that reschedule text. Use clear phrases like 'tomorrow 2pm', 'next Friday 3pm' or set date and time below.");
+                        return;
+                    }
+                } else if (rescheduleDate) {
+                    const timePart = rescheduleTime || '09:00';
+                    iso = new Date(`${rescheduleDate}T${timePart}:00`).toISOString();
+                } else {
+                    setRescheduleTarget(null);
+                    return;
+                }
+
                 if (rescheduleTarget.type === 'task') {
                     setTasks(prev => prev.map(t => 
                         t.id === rescheduleTarget.id ? { ...t, dueAt: iso } : t
@@ -481,6 +768,49 @@
                 }
                 setRescheduleTarget(null);
             };
+
+            const handlePinSubmit = () => {
+                if (pinInput === PIN_CODE) {
+                    setLocked(false);
+                    setPinInput("");
+                } else {
+                    alert("Incorrect PIN.");
+                    setPinInput("");
+                }
+            };
+
+            const weeklySectionTitle = () => {
+                const d = today;
+                const y = d.getFullYear();
+                const week = Math.ceil(((d - new Date(y, 0, 1)) / 86400000 + new Date(y, 0, 1).getDay() + 1) / 7);
+                return `Week ${week}, ${y}`;
+            };
+
+            if (locked) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
+                        <div className="w-full max-w-xs p-6 rounded-3xl bg-black/40 border border-gray-700 shadow-2xl">
+                            <h1 className="text-xl font-semibold text-center mb-4">Day Organizer</h1>
+                            <p className="text-xs text-gray-400 text-center mb-4">Enter PIN to unlock</p>
+                            <input
+                                type="password"
+                                inputMode="numeric"
+                                maxLength={4}
+                                value={pinInput}
+                                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0,4))}
+                                onKeyDown={(e) => { if (e.key === "Enter") handlePinSubmit(); }}
+                                className="w-full mb-4 p-3 rounded-2xl bg-gray-900 border border-gray-700 text-center tracking-[0.4em] text-lg"
+                            />
+                            <button
+                                onClick={handlePinSubmit}
+                                className="w-full py-3 rounded-2xl bg-blue-500 text-white font-semibold"
+                            >
+                                Unlock
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
 
             return (
                 <div className={darkMode ? 'bg-gray-900 text-white min-h-screen' : 'bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen'}>
@@ -502,25 +832,40 @@
                     {rescheduleTarget && (
                         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
                             <div className={`rounded-3xl p-6 max-w-sm w-full ${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
-                                <h2 className="text-lg font-bold mb-4">Reschedule</h2>
+                                <h2 className="text-lg font-bold mb-2">Reschedule</h2>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    You can type something like “tomorrow 2pm”, “next Friday 3pm”, “in 2 hours” or use the date and time pickers below.
+                                </p>
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="block text-sm mb-1">New date</label>
+                                        <label className="block text-sm mb-1">Natural language</label>
                                         <input
-                                            type="date"
-                                            value={rescheduleDate}
-                                            onChange={(e) => setRescheduleDate(e.target.value)}
+                                            type="text"
+                                            value={rescheduleNatural}
+                                            onChange={(e) => setRescheduleNatural(e.target.value)}
+                                            placeholder="tomorrow 2pm, next Monday morning"
                                             className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
                                         />
                                     </div>
-                                    <div>
-                                        <label className="block text-sm mb-1">New time</label>
-                                        <input
-                                            type="time"
-                                            value={rescheduleTime}
-                                            onChange={(e) => setRescheduleTime(e.target.value)}
-                                            className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
-                                        />
+                                    <div className="flex gap-3">
+                                        <div className="flex-1">
+                                            <label className="block text-sm mb-1">Date</label>
+                                            <input
+                                                type="date"
+                                                value={rescheduleDate}
+                                                onChange={(e) => setRescheduleDate(e.target.value)}
+                                                className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
+                                            />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-sm mb-1">Time</label>
+                                            <input
+                                                type="time"
+                                                value={rescheduleTime}
+                                                onChange={(e) => setRescheduleTime(e.target.value)}
+                                                className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="flex justify-end gap-3 pt-2">
                                         <button
@@ -558,7 +903,7 @@
                         </div>
                     )}
 
-                    {/* TODAY / DAILY BRIEFING SCREEN */}
+                    {/* TODAY / DAILY BRIEFING */}
                     {screen === 'today' && (
                         <div className="pb-24">
                             <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80 border-gray-800' : 'bg-white/80 border-gray-200'}`}>
@@ -569,9 +914,17 @@
                                             {today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                                         </p>
                                     </div>
-                                    <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-gray-200">
-                                        {darkMode ? '☀️' : '🌙'}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setScreen('weekly')}
+                                            className="px-3 py-1 rounded-full text-xs bg-purple-100 text-purple-700"
+                                        >
+                                            Weekly review
+                                        </button>
+                                        <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-gray-200">
+                                            {darkMode ? '☀️' : '🌙'}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -647,14 +1000,14 @@
                                                     </div>
                                                     <p className="text-sm font-medium mt-1 cursor-pointer" onClick={() => { 
                                                         setSelectedEmail(email.id); 
-                                                        setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                        setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
                                                         setScreen('draft'); 
                                                     }}>
                                                         {email.subject}
                                                     </p>
                                                     <p className="text-xs text-gray-500 mt-1 cursor-pointer" onClick={() => { 
                                                         setSelectedEmail(email.id); 
-                                                        setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                        setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
                                                         setScreen('draft'); 
                                                     }}>
                                                         {email.preview.substring(0, 90)}...
@@ -663,7 +1016,7 @@
                                                         <button
                                                             onClick={() => { 
                                                                 setSelectedEmail(email.id); 
-                                                                setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                                setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
                                                                 setScreen('draft'); 
                                                             }}
                                                             className="text-xs px-2 py-1 rounded-lg bg-blue-500 text-white"
@@ -695,9 +1048,9 @@
                                                 return (
                                                     <div key={ev.id} className="rounded-xl border p-3 bg-gray-50">
                                                         <p className="text-sm font-semibold">{ev.title}</p>
-                                                        <p className="text-xs text-gray-500 mt-1">Time: {formatTime(when)}</p>
+                                                        <p className="text-xs text-gray-500 mt-1">Time {formatTime(when)}</p>
                                                         {ev.location && (
-                                                            <p className="text-xs text-gray-500 mt-1">Location: {ev.location}</p>
+                                                            <p className="text-xs text-gray-500 mt-1">Location {ev.location}</p>
                                                         )}
                                                         <div className="flex gap-2 mt-2">
                                                             <button
@@ -720,6 +1073,225 @@
                                     ) : (
                                         <p className="text-sm text-gray-500">No events scheduled for today.</p>
                                     )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* UPCOMING SCREEN (this week + rescheduled) */}
+                    {screen === 'upcoming' && (
+                        <div className="pb-24">
+                            <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
+                                <h1 className="text-2xl font-bold">Upcoming</h1>
+                                <p className="text-sm text-gray-500 mt-1">Next 7 days and snoozed items</p>
+                            </div>
+                            <div className="p-4 space-y-6">
+                                {/* Next 7 days */}
+                                <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                    <h2 className="text-lg font-semibold mb-3">This week</h2>
+                                    <h3 className="text-sm font-semibold mb-1 text-gray-500">Tasks</h3>
+                                    {upcomingTasks.length > 0 ? (
+                                        <div className="space-y-2 mb-4">
+                                            {upcomingTasks.map(task => (
+                                                <div key={task.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50">
+                                                    <div>
+                                                        <p className={task.done ? 'line-through text-gray-400' : ''}>{task.text}</p>
+                                                        {task.dueAt && (
+                                                            <p className="text-xs text-gray-500 mt-1">
+                                                                {formatDate(task.dueAt)} at {formatTime(task.dueAt)}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        onClick={() => openReschedule('task', task.id)}
+                                                        className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                    >
+                                                        Reschedule
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 mb-4">No tasks scheduled.</p>
+                                    )}
+
+                                    <h3 className="text-sm font-semibold mb-1 text-gray-500">Emails</h3>
+                                    {upcomingEmails.length > 0 ? (
+                                        <div className="space-y-2 mb-4">
+                                            {upcomingEmails.map(email => {
+                                                const when = email.followUpAt || email.date;
+                                                return (
+                                                    <div key={email.id} className="rounded-xl p-3 bg-gray-50 border">
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <div>
+                                                                <p className="text-sm font-semibold">{email.sender}</p>
+                                                                <p className="text-xs text-gray-500">{email.senderEmail}</p>
+                                                            </div>
+                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${email.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                                {email.priority}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-sm font-medium mt-1">{email.subject}</p>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            Follow up {formatDate(when)} at {formatTime(when)}
+                                                        </p>
+                                                        <div className="flex gap-2 mt-2">
+                                                            <button
+                                                                onClick={() => { 
+                                                                    setSelectedEmail(email.id); 
+                                                                    setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
+                                                                    setScreen('draft'); 
+                                                                }}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-blue-500 text-white"
+                                                            >
+                                                                Open
+                                                            </button>
+                                                            <button
+                                                                onClick={() => openReschedule('email', email.id)}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                            >
+                                                                Reschedule
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 mb-4">No upcoming follow up emails.</p>
+                                    )}
+
+                                    <h3 className="text-sm font-semibold mb-1 text-gray-500">Events</h3>
+                                    {upcomingEvents.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {upcomingEvents.map(ev => {
+                                                const when = ev.rescheduledStart || ev.start;
+                                                return (
+                                                    <div key={ev.id} className="rounded-xl p-3 bg-gray-50 border">
+                                                        <p className="text-sm font-semibold">{ev.title}</p>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            {formatDate(when)} at {formatTime(when)}
+                                                        </p>
+                                                        {ev.location && (
+                                                            <p className="text-xs text-gray-500 mt-1">Location {ev.location}</p>
+                                                        )}
+                                                        <div className="flex gap-2 mt-2">
+                                                            <button
+                                                                onClick={() => openReschedule('event', ev.id)}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-blue-100 text-blue-700"
+                                                            >
+                                                                Reschedule
+                                                            </button>
+                                                            <button
+                                                                onClick={() => deleteEvent(ev.id)}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-700"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500">No upcoming events.</p>
+                                    )}
+                                </div>
+
+                                {/* Rescheduled / Snoozed block */}
+                                <div className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                    <h2 className="text-lg font-semibold mb-3">Rescheduled items</h2>
+                                    <h3 className="text-sm font-semibold mb-1 text-gray-500">Tasks</h3>
+                                    {rescheduledOnly.tasks.length > 0 ? (
+                                        <ul className="text-xs mb-3 space-y-1">
+                                            {rescheduledOnly.tasks.map(t => (
+                                                <li key={t.id}>
+                                                    {t.text} → {t.dueAt ? `${formatDate(t.dueAt)} ${formatTime(t.dueAt)}` : 'No date'}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 mb-3">No rescheduled tasks.</p>
+                                    )}
+
+                                    <h3 className="text-sm font-semibold mb-1 text-gray-500">Emails</h3>
+                                    {rescheduledOnly.emails.length > 0 ? (
+                                        <ul className="text-xs mb-3 space-y-1">
+                                            {rescheduledOnly.emails.map(e => (
+                                                <li key={e.id}>
+                                                    {e.subject} → {e.followUpAt ? `${formatDate(e.followUpAt)} ${formatTime(e.followUpAt)}` : 'No date'}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 mb-3">No rescheduled emails.</p>
+                                    )}
+
+                                    <h3 className="text-sm font-semibold mb-1 text-gray-500">Events</h3>
+                                    {rescheduledOnly.events.length > 0 ? (
+                                        <ul className="text-xs space-y-1">
+                                            {rescheduledOnly.events.map(ev => (
+                                                <li key={ev.id}>
+                                                    {ev.title} → {ev.rescheduledStart ? `${formatDate(ev.rescheduledStart)} ${formatTime(ev.rescheduledStart)}` : 'No override date'}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="text-xs text-gray-500">No rescheduled events.</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* WEEKLY REVIEW SCREEN */}
+                    {screen === 'weekly' && (
+                        <div className="pb-24">
+                            <div className={`sticky top-0 backdrop-blur-xl border-b p-6 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h1 className="text-2xl font-bold">Weekly review</h1>
+                                        <p className="text-sm text-gray-500 mt-1">{weeklySectionTitle()}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setScreen('today')}
+                                        className="text-blue-500 text-sm"
+                                    >
+                                        Done
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="p-4 space-y-4 text-sm">
+                                <div className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/80' : 'bg-white'}`}>
+                                    <h2 className="font-semibold mb-2">Wins</h2>
+                                    <p className="text-xs text-gray-500 mb-2">What moved retention, parent satisfaction or student progress.</p>
+                                    <textarea
+                                        value={weeklyNotes}
+                                        onChange={(e) => setWeeklyNotes(e.target.value)}
+                                        placeholder="Summarize wins, hard lessons, bottlenecks, automations to improve."
+                                        className={`w-full min-h-[200px] p-3 rounded-xl border text-sm ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-300'}`}
+                                    />
+                                </div>
+                                <div className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/80' : 'bg-white'}`}>
+                                    <h2 className="font-semibold mb-2">Data snapshot</h2>
+                                    <div className="grid grid-cols-2 gap-3 text-xs">
+                                        <div>
+                                            <p className="text-gray-500">Emails handled</p>
+                                            <p className="text-lg font-semibold">{emails.length}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-500">Events this week</p>
+                                            <p className="text-lg font-semibold">{upcomingEvents.length}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-500">Open tasks</p>
+                                            <p className="text-lg font-semibold">{tasks.filter(t => !t.done).length}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-500">Completed tasks</p>
+                                            <p className="text-lg font-semibold">{tasks.filter(t => t.done).length}</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -777,7 +1349,7 @@
                                                 className="font-semibold text-sm flex-1 cursor-pointer"
                                                 onClick={() => { 
                                                     setSelectedEmail(email.id); 
-                                                    setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                    setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
                                                     setScreen('draft'); 
                                                 }}
                                             >
@@ -804,7 +1376,7 @@
                                             className="font-medium text-sm mb-1 cursor-pointer"
                                             onClick={() => { 
                                                 setSelectedEmail(email.id); 
-                                                setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
                                                 setScreen('draft'); 
                                             }}
                                         >
@@ -814,7 +1386,7 @@
                                             className="text-xs text-gray-500 mt-1 cursor-pointer"
                                             onClick={() => { 
                                                 setSelectedEmail(email.id); 
-                                                setDraftReply(email.aiDraft || 'Click "Generate Smart Reply" to create a personalized response...');
+                                                setDraftReply(email.aiDraft || 'Click "Generate smart reply" to create a personalized response.');
                                                 setScreen('draft'); 
                                             }}
                                         >
@@ -893,7 +1465,7 @@
                                                 <textarea 
                                                     value={draftReply}
                                                     onChange={(e) => setDraftReply(e.target.value)}
-                                                    placeholder="Click 'Generate smart reply' to create a personalized response..."
+                                                    placeholder="Click 'Generate smart reply' to create a personalized response."
                                                     className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
                                                 />
                                                 <div className="flex gap-3 mt-4">
@@ -969,7 +1541,9 @@
                                 {events.length > 0 ? events.map((event, idx) => {
                                     const when = event.rescheduledStart || event.start;
                                     const eventDate = new Date(when);
-                                    const showDate = idx === 0 || new Date(events[idx-1].rescheduledStart || events[idx-1].start).toDateString() !== eventDate.toDateString();
+                                    const prevEvent = events[idx - 1];
+                                    const prevWhen = prevEvent ? (prevEvent.rescheduledStart || prevEvent.start) : null;
+                                    const showDate = idx === 0 || new Date(prevWhen).toDateString() !== eventDate.toDateString();
                                     
                                     return (
                                         <div key={event.id}>
@@ -1083,6 +1657,10 @@
                             <button onClick={() => setScreen('calendar')} className={`flex flex-col items-center ${screen === 'calendar' ? 'text-blue-500' : 'text-gray-400'}`}>
                                 <span className="text-2xl">📅</span>
                                 <span className="text-xs mt-1">Calendar</span>
+                            </button>
+                            <button onClick={() => setScreen('upcoming')} className={`flex flex-col items-center ${screen === 'upcoming' ? 'text-blue-500' : 'text-gray-400'}`}>
+                                <span className="text-2xl">⏭️</span>
+                                <span className="text-xs mt-1">Upcoming</span>
                             </button>
                             <button onClick={() => setScreen('trash')} className={`flex flex-col items-center ${screen === 'trash' ? 'text-blue-500' : 'text-gray-400'}`}>
                                 <span className="text-2xl">🗑️</span>
