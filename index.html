@@ -20,6 +20,8 @@
 <script type="text/babel">
     const { useState, useEffect } = React;
 
+    const PLACEHOLDER_REPLY = 'Click "Generate Smart Reply" to create a personalized response...';
+
     function App() {
         const [emails, setEmails] = useState([]);
         const [tasks, setTasks] = useState([]);
@@ -33,6 +35,7 @@
         const [showCopySuccess, setShowCopySuccess] = useState(false);
         const [isGenerating, setIsGenerating] = useState(false);
         const [summary, setSummary] = useState(null);
+        const [hasSmartReply, setHasSmartReply] = useState(false);
 
         // Helper: today key (yyyy-mm-dd)
         const getTodayKey = () => {
@@ -60,7 +63,6 @@
             if (savedTasks) {
                 try {
                     const parsed = JSON.parse(savedTasks);
-                    // Ensure dueDate exists
                     const normalized = parsed.map(t => ({
                         ...t,
                         dueDate: t.dueDate || todayKey
@@ -111,7 +113,6 @@
 
                 let reply = '';
 
-                // Parent Progress Inquiry
                 if (
                     subject.includes('progress') ||
                     subject.includes('how is') ||
@@ -125,9 +126,7 @@
                         `I’d be happy to walk you through recent results and next steps. ` +
                         `If you’d like, we can schedule a brief call this week to review in more detail.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // Student Work Submission
-                else if (
+                } else if (
                     tags.includes('student work') ||
                     subject.includes('essay') ||
                     subject.includes('homework') ||
@@ -138,9 +137,7 @@
                         `Thank you for sending this through. I’ve reviewed the work and appreciate the effort that went into it.\n\n` +
                         `I’ll give more detailed feedback in our upcoming session, and we’ll use it to guide the next set of worksheets and goals.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // Assessment / Scheduling
-                else if (
+                } else if (
                     tags.includes('assessment') ||
                     subject.includes('assessment') ||
                     subject.includes('schedule') ||
@@ -152,9 +149,7 @@
                         `We’re set up at Kumon of Davisville (2040 Yonge Street, Unit 205) and ready for the scheduled time.\n\n` +
                         `If anything changes or you’d like to adjust the timing, please let me know or call the center at (416) 546-5051.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // Missed Class / Absence
-                else if (
+                } else if (
                     subject.includes('miss') ||
                     subject.includes('absent') ||
                     subject.includes('sick') ||
@@ -167,18 +162,14 @@
                         `We can absolutely arrange a make-up plan so they stay on track. ` +
                         `Please let me know a couple of days/times that work, or feel free to call the center at (416) 546-5051 and we’ll coordinate.\n\n` +
                         `Warmly,\nAlnoor`;
-                }
-                // Parent Communication / General Question
-                else if (tags.includes('parent contact') || tags.includes('parent communication')) {
+                } else if (tags.includes('parent contact') || tags.includes('parent communication')) {
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for reaching out and for staying engaged in your child’s learning. I really value that partnership.\n\n` +
                         `I’d be happy to talk through your questions in more detail. ` +
                         `If you’d like, we can schedule a quick call this week, or you can share a couple of times that work for you.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // Vendor / Business Outreach
-                else if (
+                } else if (
                     tags.includes('vendor') ||
                     tags.includes('vendor outreach') ||
                     preview.includes('available to connect') ||
@@ -190,9 +181,7 @@
                         `but I’m open to learning more if it directly supports student outcomes or center efficiency.\n\n` +
                         `If you could send over a brief summary of how this might help Kumon of Davisville, I’ll review it and follow up if it’s a fit.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // Calendar / Event Notification
-                else if (
+                } else if (
                     tags.includes('calendar event') ||
                     subject.includes('notification:') ||
                     subject.includes('reminder')
@@ -202,9 +191,7 @@
                         `Thank you for the reminder. This is noted on my end and I’m set for the scheduled time.\n\n` +
                         `Looking forward to it.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // High Priority / Urgent
-                else if (
+                } else if (
                     email.priority === 'High' ||
                     subject.includes('urgent') ||
                     subject.includes('asap') ||
@@ -216,18 +203,18 @@
                         `Could we schedule a quick call today or tomorrow to go through this properly? ` +
                         `Please feel free to call me directly at (416) 546-5051 or let me know a time that works for you.\n\n` +
                         `Best regards,\nAlnoor`;
-                }
-                // Generic / Default
-                else {
+                } else {
                     reply =
                         `Hi ${firstName},\n\n` +
                         `Thank you for your message. I appreciate you taking the time to reach out.\n\n` +
-                        `I’ll review this and follow up with more detail shortly. ` +
-                        `If this is time-sensitive, you’re always welcome to call the center at (416) 546-5051.\n\n` +
+                        `I’ll review this and follow up with more details shortly. ` +
+                        `If this is time sensitive, please feel free to call the centre at (416) 546-5051.\n\n` +
                         `Best regards,\nAlnoor`;
                 }
 
                 setDraftReply(reply);
+                setHasSmartReply(true);
+
                 setEmails(emails.map(e =>
                     e.id === selectedEmail ? { ...e, aiDraft: reply } : e
                 ));
@@ -235,12 +222,13 @@
             }, 1000);
         };
 
-        // Tone adjustment for draft replies
+        // Tone adjustment for draft replies – only if a smart reply exists
         const adjustTone = (mode) => {
+            if (!hasSmartReply) return;
             if (!draftReply || !draftReply.trim()) return;
+
             let text = draftReply;
 
-            // Normalize endings
             text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
             text = text.replace(/Best regards,\s*Alnoor/gi, 'Best regards,\nAlnoor');
 
@@ -248,16 +236,20 @@
                 text = text.replace(/\bHi\b/gi, 'Hi');
                 text = text.replace(/Best regards,\s*Alnoor/gi, 'Warmly,\nAlnoor');
                 if (!text.includes('I appreciate')) {
-                    text = text.replace(/\n\nI’ll review/, '\n\nI appreciate you reaching out. I’ll review');
+                    text = text.replace(
+                        /\n\nI’ll review/,
+                        '\n\nI appreciate you reaching out. I’ll review'
+                    );
                 }
             } else if (mode === 'direct') {
-                // Remove hedging
                 text = text.replace(/\bI’d be happy to\b/gi, 'I will');
                 text = text.replace(/\bI’d be glad to\b/gi, 'I will');
                 text = text.replace(/\bif you’d like\b/gi, '');
                 text = text.replace(/\bif you would like\b/gi, '');
-                text = text.replace(/\bI’ll review this and follow up with more detail shortly\./gi,
-                    'I’ll review this and get back to you with a clear next step.');
+                text = text.replace(
+                    /\bI’ll review this and follow up with more details shortly\./gi,
+                    'I’ll review this and get back to you with a clear next step.'
+                );
             } else if (mode === 'formal') {
                 text = text.replace(/\bHi\b/gi, 'Hello');
                 text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
@@ -324,10 +316,8 @@
         };
 
         const copyDraftToClipboard = async () => {
-            const email = emails.find(e => e.id === selectedEmail);
-            if (!email) return;
-
-            const textToCopy = `To: ${email.senderEmail}\n\n${draftReply}`;
+            const textToCopy = (draftReply || '').trim();
+            if (!textToCopy) return;
 
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 try {
@@ -434,7 +424,7 @@
             if (mode === 'tomorrow') {
                 newDateObj = addDays(newDateObj, 1);
             } else if (mode === 'weekend') {
-                const day = newDateObj.getDay(); // 0 Sunday, 6 Saturday
+                const day = newDateObj.getDay();
                 const diffToSaturday = (6 - day + 7) % 7 || 7;
                 newDateObj = addDays(newDateObj, diffToSaturday);
             } else if (mode === 'nextWeek') {
@@ -448,7 +438,6 @@
                     alert('Invalid date format. Use YYYY-MM-DD.');
                     return;
                 }
-                // basic sanity check
                 const testDate = new Date(input);
                 if (isNaN(testDate.getTime())) {
                     alert('Invalid date.');
@@ -489,7 +478,6 @@
             return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         };
 
-        // Search filter for inbox
         const filteredEmails = emails.filter(e => {
             if (!searchQuery) return true;
             const q = searchQuery.toLowerCase();
@@ -498,7 +486,6 @@
                 (e.preview || '').toLowerCase().includes(q);
         });
 
-        // Agenda logic
         const isActionEmail = (email) => {
             const tags = Array.isArray(email.tags) ? email.tags : [];
             const hasActionTag = tags.includes('Action Required') || tags.includes('high priority');
@@ -533,7 +520,6 @@
         const tasksToday = tasks.filter(t => !t.done && t.dueDate === todayKey);
         const tasksOverdue = tasks.filter(t => !t.done && t.dueDate && t.dueDate < todayKey);
 
-        // Add-task local state
         const [newTaskText, setNewTaskText] = useState('');
         const [newTaskDue, setNewTaskDue] = useState(todayKey);
 
@@ -545,7 +531,8 @@
             <div className={rootClass}>
                 {showImport && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-                        <div className={`rounded-3xl p-6 max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+                        <div
+                            className={`rounded-3xl p-6 max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
                             <div className="flex justify-between mb-4">
                                 <h2 className="text-xl font-bold">Import JSON</h2>
                                 <button onClick={() => setShowImport(false)} className="text-2xl">&times;</button>
@@ -602,10 +589,9 @@
                     </div>
                 </div>
 
-                {/* Main Screens */}
+                {/* Screens */}
                 {screen === 'agenda' && (
                     <div className="pb-24 p-4 space-y-4">
-                        {/* Summary card */}
                         <div
                             className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
                             <h2 className="text-lg font-semibold mb-2">Today at a glance</h2>
@@ -615,13 +601,13 @@
                                 </p>
                             ) : (
                                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                                    Your agenda will pull in emails that likely need a response, today’s events, and tasks due
+                                    Your agenda pulls in emails that likely need a response, today’s events, and tasks due
                                     today.
                                 </p>
                             )}
                         </div>
 
-                        {/* Priority Emails */}
+                        {/* Emails */}
                         <div
                             className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
                             <div className="flex items-center justify-between mb-2">
@@ -640,8 +626,13 @@
                                         className={`rounded-xl p-3 border cursor-pointer ${darkMode ? 'bg-gray-900/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}
                                         onClick={() => {
                                             setSelectedEmail(email.id);
-                                            setDraftReply(email.aiDraft ||
-                                                'Click "Generate Smart Reply" to create a personalized response...');
+                                            if (email.aiDraft) {
+                                                setDraftReply(email.aiDraft);
+                                                setHasSmartReply(true);
+                                            } else {
+                                                setDraftReply(PLACEHOLDER_REPLY);
+                                                setHasSmartReply(false);
+                                            }
                                             setScreen('draft');
                                         }}
                                     >
@@ -674,7 +665,7 @@
                             </div>
                         </div>
 
-                        {/* Today’s Tasks */}
+                        {/* Tasks */}
                         <div
                             className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
                             <div className="flex items-center justify-between mb-2">
@@ -716,9 +707,19 @@
                                                         Tomorrow
                                                     </button>
                                                     <button
+                                                        onClick={() => rescheduleTask(task.id, 'weekend')}
+                                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                        Weekend
+                                                    </button>
+                                                    <button
                                                         onClick={() => rescheduleTask(task.id, 'nextWeek')}
                                                         className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
                                                         Next week
+                                                    </button>
+                                                    <button
+                                                        onClick={() => rescheduleTask(task.id, 'pick')}
+                                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                        Pick date
                                                     </button>
                                                 </div>
                                             </div>
@@ -761,7 +762,7 @@
                                             <button
                                                 onClick={() => rescheduleTask(task.id, 'weekend')}
                                                 className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                                                This weekend
+                                                Weekend
                                             </button>
                                             <button
                                                 onClick={() => rescheduleTask(task.id, 'nextWeek')}
@@ -779,7 +780,7 @@
                             </div>
                         </div>
 
-                        {/* Today’s Events */}
+                        {/* Events */}
                         <div
                             className={`rounded-2xl p-4 border mb-20 ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
                             <div className="flex items-center justify-between mb-2">
@@ -811,7 +812,8 @@
                     <div className="pb-24">
                         <div
                             className={`sticky top-[64px] backdrop-blur-xl border-b px-6 py-3 ${darkMode ? 'bg-gray-900/80' : 'bg-white/80'}`}>
-                            <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                            <div
+                                className={`flex items-center gap-2 px-4 py-2 rounded-xl ${darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
                                 <span className="text-xl">🔍</span>
                                 <input
                                     type="text"
@@ -832,11 +834,15 @@
                                     key={email.id}
                                     className={`rounded-2xl p-4 border relative cursor-pointer ${darkMode ? 'bg-gray-800/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}
                                     onClick={(e) => {
-                                        // avoid click when pressing delete
                                         if (e.target.dataset.role === 'delete') return;
                                         setSelectedEmail(email.id);
-                                        setDraftReply(email.aiDraft ||
-                                            'Click "Generate Smart Reply" to create a personalized response...');
+                                        if (email.aiDraft) {
+                                            setDraftReply(email.aiDraft);
+                                            setHasSmartReply(true);
+                                        } else {
+                                            setDraftReply(PLACEHOLDER_REPLY);
+                                            setHasSmartReply(false);
+                                        }
                                         setScreen('draft');
                                     }}
                                 >
@@ -887,7 +893,6 @@
                                 if (!email) return null;
                                 return (
                                     <>
-                                        {/* Email preview */}
                                         <div
                                             className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
                                             <div className="flex items-start justify-between mb-3">
@@ -920,7 +925,6 @@
                                             )}
                                         </div>
 
-                                        {/* Reply card */}
                                         <div
                                             className={`rounded-2xl p-5 border ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
                                             <h2 className="text-xl font-bold mb-3">🤖 Smart Reply</h2>
@@ -940,35 +944,36 @@
                                             <textarea
                                                 value={draftReply}
                                                 onChange={(e) => setDraftReply(e.target.value)}
-                                                placeholder="Click 'Generate Smart Reply' to create a personalized response..."
+                                                placeholder={PLACEHOLDER_REPLY}
                                                 className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
                                             />
 
-                                            {/* Tone controls */}
-                                            <div className="flex flex-wrap gap-2 mt-3">
-                                                <span className="text-xs text-gray-500 mr-2">Edit tone:</span>
-                                                <button
-                                                    onClick={() => adjustTone('friendly')}
-                                                    className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700">
-                                                    More friendly
-                                                </button>
-                                                <button
-                                                    onClick={() => adjustTone('direct')}
-                                                    className="text-xs px-3 py-1 rounded-full bg-amber-50 text-amber-700">
-                                                    More direct
-                                                </button>
-                                                <button
-                                                    onClick={() => adjustTone('formal')}
-                                                    className="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-700">
-                                                    More formal
-                                                </button>
-                                            </div>
+                                            {hasSmartReply && (
+                                                <div className="flex flex-wrap gap-2 mt-3">
+                                                    <span className="text-xs text-gray-500 mr-2">Edit tone:</span>
+                                                    <button
+                                                        onClick={() => adjustTone('friendly')}
+                                                        className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700">
+                                                        More friendly
+                                                    </button>
+                                                    <button
+                                                        onClick={() => adjustTone('direct')}
+                                                        className="text-xs px-3 py-1 rounded-full bg-amber-50 text-amber-700">
+                                                        More direct
+                                                    </button>
+                                                    <button
+                                                        onClick={() => adjustTone('formal')}
+                                                        className="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-700">
+                                                        More formal
+                                                    </button>
+                                                </div>
+                                            )}
 
                                             <div className="flex gap-3 mt-4">
                                                 <button
                                                     onClick={copyDraftToClipboard}
                                                     className="flex-1 bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold">
-                                                    📋 Copy Email & Reply
+                                                    📋 Copy Reply
                                                 </button>
                                                 <button
                                                     onClick={() => setScreen('inbox')}
@@ -1060,16 +1065,6 @@
                                                     Tomorrow
                                                 </button>
                                                 <button
-                                                    onClick={() => rescheduleTask(task.id, 'weekend')}
-                                                    className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                                                    This weekend
-                                                </button>
-                                                <button
-                                                    onClick={() => rescheduleTask(task.id, 'nextWeek')}
-                                                    className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                                                    Next week
-                                                </button>
-                                                <button
                                                     onClick={() => rescheduleTask(task.id, 'pick')}
                                                     className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
                                                     Pick date
@@ -1143,7 +1138,6 @@
                     </div>
                 )}
 
-                {/* Bottom navigation */}
                 <div
                     className={`fixed bottom-0 left-0 right-0 border-t backdrop-blur-xl ${darkMode ? 'bg-gray-900/95 border-gray-800' : 'bg-white/95 border-gray-200'}`}>
                     <div className="flex justify-around p-3">
