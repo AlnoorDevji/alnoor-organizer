@@ -37,12 +37,18 @@
         const [summary, setSummary] = useState(null);
         const [hasSmartReply, setHasSmartReply] = useState(false);
 
-        // New: action sheet for Agenda emails
+        // Email action sheet for agenda
         const [activeAgendaEmail, setActiveAgendaEmail] = useState(null);
         const [showEmailActionSheet, setShowEmailActionSheet] = useState(false);
 
-        // New: modal for events
+        // Event modal and reschedule picker
         const [activeEvent, setActiveEvent] = useState(null);
+        const [eventToReschedule, setEventToReschedule] = useState(null);
+        const [eventNewStart, setEventNewStart] = useState('');
+
+        // Task reschedule popup
+        const [taskToReschedule, setTaskToReschedule] = useState(null);
+        const [taskNewDate, setTaskNewDate] = useState('');
 
         // Helper: today key (yyyy-mm-dd)
         const getTodayKey = () => {
@@ -103,7 +109,7 @@
             localStorage.setItem('dayorganizer-events', JSON.stringify(events));
         }, [events]);
 
-        // Rule-based "smart reply" generator (no API)
+        // Rule based smart reply generator
         const generateAIReply = (emailIdOverride) => {
             const targetId = emailIdOverride ?? selectedEmail;
             const email = emails.find(e => e.id === targetId);
@@ -230,40 +236,44 @@
             }, 1000);
         };
 
-        // Tone adjustment for draft replies
+        // Tone adjustment
         const adjustTone = (mode) => {
-    let text = draftReply;
-    if (!text || !text.trim()) return;
+            let text = draftReply;
+            if (!text || !text.trim()) return;
 
-    // Normalize signature
-    text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
+            // Normalize signature
+            text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
 
-    if (mode === 'friendly') {
-        text = text.replace(/\bHi\b/gi, 'Hi');
-        text = text.replace(/Best regards,\s*Alnoor/gi, 'Warmly,\nAlnoor');
-        if (!text.includes('I appreciate')) {
-            text = text.replace(/\n\nI (?:will|would) review/, '\n\nI appreciate you reaching out. I will review');
-        }
-    }
+            if (mode === 'friendly') {
+                text = text.replace(/\bHi\b/gi, 'Hi');
+                text = text.replace(/Best regards,\s*Alnoor/gi, 'Warmly,\nAlnoor');
+                if (!text.includes('I appreciate')) {
+                    text = text.replace(
+                        /\n\nI (?:will|would) review/,
+                        '\n\nI appreciate you reaching out. I will review'
+                    );
+                }
+            }
 
-    if (mode === 'direct') {
-        text = text.replace(/\bI would be happy to\b/gi, 'I will');
-        text = text.replace(/\bI would be glad to\b/gi, 'I will');
-        text = text.replace(/\bif you would like\b/gi, '');
-        text = text.replace(
-            /\bI will review this and follow up with more details shortly\./gi,
-            'I will review this and get back to you with a clear next step.'
-        );
-    }
+            if (mode === 'direct') {
+                text = text.replace(/\bI would be happy to\b/gi, 'I will');
+                text = text.replace(/\bI would be glad to\b/gi, 'I will');
+                text = text.replace(/\bif you would like\b/gi, '');
+                text = text.replace(
+                    /\bI will review this and follow up with more details shortly\./gi,
+                    'I will review this and get back to you with a clear next step.'
+                );
+            }
 
-    if (mode === 'formal') {
-        text = text.replace(/\bHi\b/gi, 'Hello');
-        text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
-        text = text.replace(/\bThanks\b/gi, 'Thank you');
-    }
+            if (mode === 'formal') {
+                text = text.replace(/\bHi\b/gi, 'Hello');
+                text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
+                text = text.replace(/\bThanks\b/gi, 'Thank you');
+            }
 
-    setDraftReply(text);
-};
+            setDraftReply(text);
+            setHasSmartReply(true);
+        };
 
         const importJSON = (e) => {
             const file = e.target.files[0];
@@ -453,19 +463,9 @@
                 newDateObj = addDays(newDateObj, 7);
             } else if (mode === 'pick') {
                 const current = task.dueDate || todayKey;
-                const input = prompt('Enter new due date (YYYY-MM-DD)', current);
-                if (!input) return;
-                const valid = /^\d{4}-\d{2}-\d{2}$/.test(input);
-                if (!valid) {
-                    alert('Invalid date format. Use YYYY-MM-DD.');
-                    return;
-                }
-                const testDate = new Date(input);
-                if (isNaN(testDate.getTime())) {
-                    alert('Invalid date.');
-                    return;
-                }
-                newDateObj = testDate;
+                setTaskToReschedule(taskId);
+                setTaskNewDate(current);
+                return;
             }
 
             const year = newDateObj.getFullYear();
@@ -478,7 +478,7 @@
             ));
         };
 
-        // Event helpers for modal
+        // Event helpers
         const markEventDoneToday = (eventId) => {
             setEvents(events.map(ev =>
                 ev.id === eventId ? { ...ev, doneToday: true } : ev
@@ -486,41 +486,28 @@
             setActiveEvent(null);
         };
 
-        const rescheduleEvent = (eventId) => {
-    const ev = events.find(e => e.id === eventId);
-    if (!ev) return;
+        const openEventReschedule = (event) => {
+            setEventToReschedule(event.id);
+            setEventNewStart(event.start ? event.start.slice(0, 16) : '');
+        };
 
-    // Create container for the picker
-    const picker = document.createElement('input');
-    picker.type = 'datetime-local';
-    picker.value = ev.start ? ev.start.slice(0, 16) : '';
-    picker.style.position = 'fixed';
-    picker.style.left = '-9999px';
-    document.body.appendChild(picker);
-
-    // Simulate a click to bring up iOS date/time picker
-    picker.click();
-
-    picker.addEventListener('change', () => {
-        const newVal = picker.value;
-        document.body.removeChild(picker);
-
-        if (!newVal) return;
-
-        const d = new Date(newVal);
-        if (isNaN(d.getTime())) {
-            alert('Invalid date.');
-            return;
-        }
-
-        const iso = d.toISOString();
-
-        setEvents(events.map(e =>
-            e.id === eventId ? { ...e, start: iso } : e
-        ));
-        setActiveEvent(null);
-    });
-};
+        const confirmEventReschedule = () => {
+            if (!eventToReschedule || !eventNewStart) {
+                setEventToReschedule(null);
+                return;
+            }
+            const d = new Date(eventNewStart);
+            if (isNaN(d.getTime())) {
+                alert('Invalid date.');
+                return;
+            }
+            const iso = d.toISOString();
+            setEvents(events.map(e =>
+                e.id === eventToReschedule ? { ...e, start: iso } : e
+            ));
+            setEventToReschedule(null);
+            setActiveEvent(null);
+        };
 
         const formatTime = (dateStr) => {
             if (!dateStr) return '';
@@ -598,11 +585,12 @@
             : 'bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen';
 
         const showToneControls =
-            hasSmartReply ||
-            (draftReply && draftReply.trim() && draftReply !== PLACEHOLDER_REPLY);
+            (draftReply && draftReply.trim() && draftReply !== PLACEHOLDER_REPLY) ||
+            hasSmartReply;
 
         return (
             <div className={rootClass}>
+                {/* Import JSON modal */}
                 {showImport && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
                         <div
@@ -622,10 +610,82 @@
                     </div>
                 )}
 
+                {/* Copy toast */}
                 {showCopySuccess && (
                     <div
                         className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50">
                         ✅ Copied to clipboard!
+                    </div>
+                )}
+
+                {/* Task date picker modal */}
+                {taskToReschedule && (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                        <div className={`w-full max-w-xs rounded-3xl p-5 ${darkMode ? 'bg-gray-900' : 'bg-white'}`}>
+                            <h2 className="text-lg font-semibold mb-3">Pick new date</h2>
+                            <input
+                                type="date"
+                                value={taskNewDate}
+                                onChange={(e) => setTaskNewDate(e.target.value)}
+                                className="w-full border rounded-xl px-3 py-2 text-sm mb-4"
+                            />
+                            <div className="flex gap-2">
+                                <button
+                                    className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-200"
+                                    onClick={() => {
+                                        setTaskToReschedule(null);
+                                    }}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    className="flex-1 py-2 rounded-xl text-sm font-medium bg-blue-500 text-white"
+                                    onClick={() => {
+                                        if (!taskNewDate) {
+                                            alert('Please pick a date.');
+                                            return;
+                                        }
+                                        setTasks(tasks.map(t =>
+                                            t.id === taskToReschedule ? { ...t, dueDate: taskNewDate } : t
+                                        ));
+                                        setTaskToReschedule(null);
+                                    }}
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Event reschedule modal */}
+                {eventToReschedule && (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                        <div className={`w-full max-w-xs rounded-3xl p-5 ${darkMode ? 'bg-gray-900' : 'bg-white'}`}>
+                            <h2 className="text-lg font-semibold mb-3">Reschedule event</h2>
+                            <input
+                                type="datetime-local"
+                                value={eventNewStart}
+                                onChange={(e) => setEventNewStart(e.target.value)}
+                                className="w-full border rounded-xl px-3 py-2 text-sm mb-4"
+                            />
+                            <div className="flex gap-2">
+                                <button
+                                    className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-200"
+                                    onClick={() => {
+                                        setEventToReschedule(null);
+                                    }}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    className="flex-1 py-2 rounded-xl text-sm font-medium bg-blue-500 text-white"
+                                    onClick={confirmEventReschedule}
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -732,7 +792,7 @@
                                 </button>
                                 <button
                                     className="w-full py-2 rounded-xl text-sm font-medium bg-blue-500 text-white"
-                                    onClick={() => rescheduleEvent(activeEvent.id)}
+                                    onClick={() => openEventReschedule(activeEvent)}
                                 >
                                     Reschedule
                                 </button>
@@ -793,8 +853,7 @@
                                 </p>
                             ) : (
                                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                                    Your agenda pulls in emails that likely need a response, today’s events, and tasks due
-                                    today.
+                                    Your agenda pulls in emails that likely need a response, today’s events, and tasks due today.
                                 </p>
                             )}
                         </div>
@@ -1148,7 +1207,7 @@
                                                 className="w-full p-4 rounded-xl border min-h-64 bg-gray-50 text-sm"
                                             />
 
-                                            {(draftReply.trim() && draftReply !== PLACEHOLDER_REPLY) && (
+                                            {showToneControls && (
                                                 <div className="flex flex-wrap gap-2 mt-3">
                                                     <span className="text-xs text-gray-500 mr-2">Edit tone:</span>
                                                     <button
@@ -1348,6 +1407,7 @@
                     </div>
                 )}
 
+                {/* Bottom nav */}
                 <div
                     className={`fixed bottom-0 left-0 right-0 border-t backdrop-blur-xl ${darkMode ? 'bg-gray-900/95 border-gray-800' : 'bg-white/95 border-gray-200'}`}>
                     <div className="flex justify-around p-3">
