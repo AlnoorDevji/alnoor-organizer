@@ -232,39 +232,38 @@
 
         // Tone adjustment for draft replies
         const adjustTone = (mode) => {
-            if (!draftReply || !draftReply.trim()) return;
+    let text = draftReply;
+    if (!text || !text.trim()) return;
 
-            let text = draftReply;
+    // Normalize signature
+    text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
 
-            text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
-            text = text.replace(/Best regards,\s*Alnoor/gi, 'Best regards,\nAlnoor');
+    if (mode === 'friendly') {
+        text = text.replace(/\bHi\b/gi, 'Hi');
+        text = text.replace(/Best regards,\s*Alnoor/gi, 'Warmly,\nAlnoor');
+        if (!text.includes('I appreciate')) {
+            text = text.replace(/\n\nI (?:will|would) review/, '\n\nI appreciate you reaching out. I will review');
+        }
+    }
 
-            if (mode === 'friendly') {
-                text = text.replace(/\bHi\b/gi, 'Hi');
-                text = text.replace(/Best regards,\s*Alnoor/gi, 'Warmly,\nAlnoor');
-                if (!text.includes('I appreciate')) {
-                    text = text.replace(
-                        /\n\nI will review/,
-                        '\n\nI appreciate you reaching out. I will review'
-                    );
-                }
-            } else if (mode === 'direct') {
-                text = text.replace(/\bI would be happy to\b/gi, 'I will');
-                text = text.replace(/\bI would be glad to\b/gi, 'I will');
-                text = text.replace(/\bif you would like\b/gi, '');
-                text = text.replace(
-                    /\bI will review this and follow up with more details shortly\./gi,
-                    'I will review this and get back to you with a clear next step.'
-                );
-            } else if (mode === 'formal') {
-                text = text.replace(/\bHi\b/gi, 'Hello');
-                text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
-                text = text.replace(/\bThanks\b/gi, 'Thank you');
-            }
+    if (mode === 'direct') {
+        text = text.replace(/\bI would be happy to\b/gi, 'I will');
+        text = text.replace(/\bI would be glad to\b/gi, 'I will');
+        text = text.replace(/\bif you would like\b/gi, '');
+        text = text.replace(
+            /\bI will review this and follow up with more details shortly\./gi,
+            'I will review this and get back to you with a clear next step.'
+        );
+    }
 
-            setDraftReply(text);
-            setHasSmartReply(true);
-        };
+    if (mode === 'formal') {
+        text = text.replace(/\bHi\b/gi, 'Hello');
+        text = text.replace(/Warmly,\s*Alnoor/gi, 'Best regards,\nAlnoor');
+        text = text.replace(/\bThanks\b/gi, 'Thank you');
+    }
+
+    setDraftReply(text);
+};
 
         const importJSON = (e) => {
             const file = e.target.files[0];
