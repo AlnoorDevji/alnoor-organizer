@@ -883,11 +883,33 @@
                         <div
                             className={`rounded-2xl p-4 border ${darkMode ? 'bg-gray-800/70 border-gray-700' : 'bg-white/80 border-gray-200'}`}>
                             <h2 className="text-lg font-semibold mb-2">Today at a glance</h2>
-                            {summary && summary.text ? (
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
-                                    {summary.text}
-                                </p>
-                            ) : (
+                            {/* Summary block */}
+{summary && summary.text && (
+    <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+        {summary.text}
+    </p>
+)}
+
+{/* Parent Summary */}
+{parentSummary && (
+    <div className="mt-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/40">
+        <p className="font-semibold text-sm mb-1">
+            👨‍👩‍👦 Parent Summary
+        </p>
+        {parentSummary.headline && (
+            <p className="text-sm mb-2">{parentSummary.headline}</p>
+        )}
+
+        {Array.isArray(parentSummary.action_items) && parentSummary.action_items.length > 0 && (
+            <ul className="list-disc pl-5 text-sm space-y-1">
+                {parentSummary.action_items.map((item, i) => (
+                    <li key={i}>{item}</li>
+                ))}
+            </ul>
+        )}
+    </div>
+)}
+
                                 <p className="text-sm text-gray-600 dark:text-gray-300">
                                     Your agenda pulls in emails that likely need a response, today’s events, and tasks due today.
                                 </p>
