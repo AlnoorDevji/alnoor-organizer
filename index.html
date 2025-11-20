@@ -275,64 +275,99 @@
             setHasSmartReply(true);
         };
 
-        const importJSON = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+       const importJSON = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                try {
-                    const data = JSON.parse(event.target.result);
-                    const emailData = Array.isArray(data) ? data : (data.emails || []);
-                    const eventData = data.events || [];
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const data = JSON.parse(event.target.result);
 
-                    const processed = emailData.map((item, i) => ({
-                        id: item.id || (Date.now() + i),
-                        sender: (item.sender || '').replace(/<.*>/, '').trim(),
-                        senderEmail: (item.sender && item.sender.match(/<(.+?)>/))
-                            ? item.sender.match(/<(.+?)>/)[1]
-                            : (item.senderEmail || item.sender || ''),
-                        subject: item.subject || '(No subject)',
-                        preview: item.preview || '',
-                        date: item.received_at || item.date || new Date().toISOString(),
-                        priority: item.priority || (item.tags && item.tags.includes('Action Required') ? 'High' : 'Medium'),
-                        tags: item.tags || [],
-                        aiDraft: item.aiDraft || '',
-                        action_required: item.action_required || false,
-                        priority_score: typeof item.priority_score === 'number' ? item.priority_score : null,
-                        category: item.category || null,
-                        completed: item.completed || false,
-                        snoozedForToday: item.snoozedForToday || false
-                    }));
+            // ---------- 1. EMAILS ----------
+            const emailData = Array.isArray(data.emails) ? data.emails : [];
+            const processedEmails = emailData.map((item, i) => ({
+                id: item.id || (Date.now() + i),
+                sender: (item.sender || '').replace(/<.*>/, '').trim(),
+                senderEmail: item.senderEmail || item.sender || '',
+                subject: item.subject || '(No subject)',
+                preview: item.preview || '',
+                date: item.received_at || item.date || new Date().toISOString(),
+                priority: item.priority || 'Medium',
+                tags: item.tags || [],
+                aiDraft: item.aiDraft || '',
+                action_required: item.action_required || false,
+                priority_score: item.priority_score ?? null,
+                category: item.category || null,
+                completed: item.completed || false,
+                snoozedForToday: item.snoozedForToday || false
+            }));
 
-                    const processedEvents = eventData.map(ev => ({
-                        id: ev.id || ev.title + (ev.start || ''),
-                        title: ev.title || '(No title)',
-                        start: ev.start,
-                        end: ev.end,
-                        location: ev.location || '',
-                        is_today: ev.is_today || false,
-                        is_within_3_days: ev.is_within_3_days || false,
-                        doneToday: ev.doneToday || false
-                    }));
+            // ---------- 2. EVENTS ----------
+            const eventData = Array.isArray(data.events) ? data.events : [];
+            const processedEvents = eventData.map(ev => ({
+                id: ev.id || ev.title + (ev.start || ''),
+                title: ev.title || '(No title)',
+                start: ev.start,
+                end: ev.end,
+                location: ev.location || '',
+                is_today: ev.is_today || false,
+                is_within_3_days: ev.is_within_3_days || false,
+                doneToday: ev.doneToday || false
+            }));
 
-                    setEmails(processed);
-                    setEvents(processedEvents);
-                    if (data.summary) {
-                        setSummary(data.summary);
-                    } else {
-                        setSummary(null);
-                    }
-
-                    setShowImport(false);
-                    alert('✅ Imported ' + processed.length + ' emails and ' + processedEvents.length + ' events!');
-                } catch (err) {
-                    console.error(err);
-                    alert('❌ Error: ' + err.message);
+            // ---------- 3. TASKS ----------
+            const rawTasks = Array.isArray(data.tasks) ? data.tasks : [];
+            const normalizedTasks = rawTasks.map((t, idx) => {
+                // Shape A (08:07 file): { id, text, dueDate, done, sourceType, sourceId }
+                if (t.text && t.dueDate) {
+                    return {
+                        id: t.id || ('task_' + idx),
+                        text: t.text,
+                        done: t.done || false,
+                        dueDate: t.dueDate,
+                        sourceType: t.sourceType || t.source || 'email',
+                        sourceId: t.sourceId || t.source_id || null,
+                        priority_score: t.priority_score ?? 50
+                    };
                 }
-            };
-            reader.readAsText(file);
-        };
+
+                // Shape B (16:34 file): { id, title, due_date, source, email_id, priority_score }
+                return {
+                    id: t.id || ('task_' + idx),
+                    text: t.title || '(Untitled Task)',
+                    done: false,
+                    dueDate: t.due_date || todayKey,
+                    sourceType: t.source || 'email',
+                    sourceId: t.email_id || null,
+                    priority_score: t.priority_score ?? 50
+                };
+            });
+
+            // ---------- 4. PARENT SUMMARY ----------
+            // Save directly; UI will render it under “Today at a Glance”
+            const parentSummaryBlock = data.parent_summary || null;
+
+            // ---------- 5. SUMMARY ----------
+            const summaryBlock = data.summary || null;
+
+            // ---------- 6. Update React State ----------
+            setEmails(processedEmails);
+            setEvents(processedEvents);
+            setTasks(normalizedTasks);
+            setSummary(summaryBlock);
+            setParentSummary(parentSummaryBlock); // (You will add this one line of state in section 2)
+
+            setShowImport(false);
+            alert(`✅ Imported ${processedEmails.length} emails, ${processedEvents.length} events, ${normalizedTasks.length} tasks!`);
+        } catch (err) {
+            console.error(err);
+            alert('❌ Error: ' + err.message);
+        }
+    };
+
+    reader.readAsText(file);
+};
 
         const copyDraftToClipboard = async () => {
             const textToCopy = (draftReply || '').trim();
